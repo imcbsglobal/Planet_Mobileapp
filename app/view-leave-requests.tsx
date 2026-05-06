@@ -1,6 +1,7 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
 import {
@@ -15,11 +16,11 @@ import {
 } from 'react-native';
 
 const ViewLeaveRequests = () => {
-  const router = useRouter();
-  const params = useLocalSearchParams(); 
+  const navigation = useNavigation();
   
-  // State management
-  const [loadingTab, setLoadingTab] = useState(null);
+  // State management 
+  
+  const [loadingTab, setLoadingTab] = useState<string | null>(null);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,17 +47,7 @@ const ViewLeaveRequests = () => {
   useEffect(() => {
     const loadUserCredentials = async () => {
       try {
-        // Method 1: Try to get from route parameters first
-        if (params.userid && params.password) {
-          setUserCredentials({
-            userid: params.userid as string,
-            password: params.password as string
-          });
-          setIsLoadingCredentials(false);
-          return;
-        }
-
-        // Method 2: Try to get from secure storage
+        // Try to get from secure storage
         const storedUserid = await SecureStore.getItemAsync('userId');
         const storedPassword = await SecureStore.getItemAsync('password');
         
@@ -66,14 +57,14 @@ const ViewLeaveRequests = () => {
             password: storedPassword
           });
         } else {
-          // Method 3: Fallback - show alert and go back
+          // Fallback - show alert and go back
           Alert.alert(
             'Authentication Error',
             'User credentials not found. Please login again.',
             [
               {
                 text: 'OK',
-                onPress: () => router.replace('/login')
+                onPress: () => navigation.navigate('Login')
               }
             ]
           );
@@ -87,7 +78,7 @@ const ViewLeaveRequests = () => {
           [
             {
               text: 'OK',
-              onPress: () => router.replace('/login')
+              onPress: () => navigation.navigate('Login')
             }
           ]
         );
@@ -98,7 +89,7 @@ const ViewLeaveRequests = () => {
     };
 
     loadUserCredentials();
-  }, [params.userid, params.password, router]);
+  }, []);
 
   // Fetch leave requests from API with status filter
   const fetchLeaveRequests = async (showLoader = true, statusFilter = null) => {
@@ -237,7 +228,7 @@ const ViewLeaveRequests = () => {
   };
 
   // Delete leave request
-  const deleteLeaveRequest = async (requestId) => {
+  const deleteLeaveRequest = async (requestId: any) => {
     // Don't delete if credentials are not loaded
     if (isLoadingCredentials || !userCredentials.userid || !userCredentials.password) {
       Alert.alert('Error', 'User credentials not available');
@@ -311,7 +302,7 @@ const ViewLeaveRequests = () => {
   };
 
   // Handle delete confirmation
-  const handleDeleteRequest = (request) => {
+  const handleDeleteRequest = (request: any) => {
     Alert.alert(
       'Delete Leave Request',
       `Are you sure you want to delete this leave request?\n\nDate: ${formatDate(request.startDate)} to ${formatDate(request.endDate)}\nReason: ${request.reason}`,
@@ -334,7 +325,7 @@ const ViewLeaveRequests = () => {
   }, [isLoadingCredentials, userCredentials.userid, userCredentials.password]);
 
   // Handle filter change - fetch data with status filter
-  const handleFilterChange = (filter) => {
+  const handleFilterChange = (filter: string) => {
     setActiveFilter(filter);
     setCurrentPage(1);
     // Fetch data with the new filter
@@ -357,8 +348,18 @@ const ViewLeaveRequests = () => {
     );
   };
 
+  // Get status config
+  const getStatusConfig = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'approved': return { bg: '#D1FAE5', text: '#065F46', dot: '#10B981' };
+      case 'rejected': return { bg: '#FEE2E2', text: '#991B1B', dot: '#EF4444' };
+      case 'pending':  return { bg: '#FEF8E7', text: '#92400E', dot: '#F5C451' };
+      default:         return { bg: '#F2F0E9', text: '#7E7767', dot: '#B5B0A4' };
+    }
+  };
+
   // Get status color
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case 'approved':
         return '#28a745';
@@ -372,16 +373,16 @@ const ViewLeaveRequests = () => {
   };
 
   // Handle tab navigation
-  const handleTabNavigation = async (route) => {
+  const handleTabNavigation = async (route: string) => {
     if (loadingTab) return;
     setLoadingTab(route);
     await new Promise((res) => setTimeout(res, 300));
-    router.push(`/${route}`);
+    navigation.navigate(route);
     setLoadingTab(null);
   };
 
   // Fixed format date for display - matching the web version DD-MM-YYYY
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
     
     try {
@@ -437,7 +438,7 @@ const ViewLeaveRequests = () => {
   };
 
   // Get leave type display name
-  const getLeaveTypeDisplayName = (leaveType) => {
+  const getLeaveTypeDisplayName = (leaveType: string) => {
     const typeMap = {
       'full_day': 'Full Day',
       'half_day_morning': 'Half Day - Morning',
@@ -449,7 +450,7 @@ const ViewLeaveRequests = () => {
   };
 
   // Get request count for each status
-  const getStatusCount = (status) => {
+  const getStatusCount = (status: string) => {
     if (status === 'All') {
       return leaveRequests.length;
     }
@@ -481,55 +482,64 @@ const ViewLeaveRequests = () => {
       {/* Loading Overlay */}
       {loadingTab && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color="#F5C451" />
           <Text style={styles.loadingOverlayTxt}>Loading…</Text>
         </View>
       )}
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={20} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Leave Requests</Text>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={24} color="#fff" />
+        <View>
+          <Text style={styles.pageLabelSmall}>RECORDS</Text>
+          <Text style={styles.pageTitle}>Leave Requests</Text>
+        </View>
+        <TouchableOpacity style={styles.refreshIconButton} onPress={onRefresh}>
+          <Ionicons name="refresh" size={20} color="#D4A574" />
         </TouchableOpacity>
       </View>
 
-      {/* Filter Tabs with Counts */}
-      <View style={styles.filterContainer}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
+      {/* Hero Summary Banner */}
+      <View style={styles.heroBanner}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.heroLabel}>OVERVIEW</Text>
+          <Text style={styles.heroTitle}>
+            {leaveRequests.length} Request{leaveRequests.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+        <View style={styles.heroStats}>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#F5C451' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Pending')} Pending</Text>
+          </View>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#10B981' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Approved')} Approved</Text>
+          </View>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#EF4444' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Rejected')} Rejected</Text>
+          </View>
+        </View>
+        <View style={styles.heroDecoration} />
+      </View>
+
+      {/* Filter Tabs */}
+      <View style={styles.filterRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
           {filterOptions.map((filter) => (
             <TouchableOpacity
               key={filter}
-              style={[
-                styles.filterTab,
-                activeFilter === filter && styles.activeFilterTab,
-              ]}
+              style={[styles.filterTab, activeFilter === filter && styles.filterTabActive]}
               onPress={() => handleFilterChange(filter)}
             >
-              <Text
-                style={[
-                  styles.filterTabText,
-                  activeFilter === filter && styles.activeFilterTabText,
-                ]}
-              >
+              <Text style={[styles.filterTabText, activeFilter === filter && styles.filterTabTextActive]}>
                 {filter}
               </Text>
-              {/* Show count badge */}
-              <View style={[
-                styles.countBadge,
-                activeFilter === filter && styles.activeCountBadge,
-              ]}>
-                <Text style={[
-                  styles.countText,
-                  activeFilter === filter && styles.activeCountText,
-                ]}>
+              <View style={[styles.filterBadge, activeFilter === filter && styles.filterBadgeActive]}>
+                <Text style={[styles.filterBadgeText, activeFilter === filter && styles.filterBadgeTextActive]}>
                   {getStatusCount(filter)}
                 </Text>
               </View>
@@ -538,96 +548,128 @@ const ViewLeaveRequests = () => {
         </ScrollView>
       </View>
 
-      {/* User Info Display */}
-      <View style={styles.userInfo}>
-        <Ionicons name="person" size={16} color="#fff" />
-        <Text style={styles.userInfoText}>
-          Logged in as: {userCredentials.userid}
-        </Text>
-      </View>
-
       {/* Content */}
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentContainer}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#007AFF"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F5C451" />
         }
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Loading leave requests...</Text>
+          <View style={styles.centerState}>
+            <ActivityIndicator size="large" color="#F5C451" />
+            <Text style={styles.stateText}>Loading leave requests...</Text>
           </View>
         ) : currentRequests.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="document-text-outline" size={64} color="#fff" />
-            <Text style={styles.emptyText}>No leave requests found</Text>
-            <Text style={styles.emptySubText}>
-              {activeFilter === 'All' 
-                ? 'You haven\'t submitted any leave requests yet.'
-                : `No ${activeFilter.toLowerCase()} leave requests found.`
-              }
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="calendar-outline" size={32} color="#D4A574" />
+            </View>
+            <Text style={styles.emptyTitle}>No requests found</Text>
+            <Text style={styles.emptySubtext}>
+              {activeFilter === 'All'
+                ? "You haven't submitted any leave requests yet."
+                : `No ${activeFilter.toLowerCase()} leave requests found.`}
             </Text>
             <TouchableOpacity
-              style={styles.addLeaveButton}
-              onPress={() => router.push('/request')}
+              style={styles.newRequestButton}
+              onPress={() => navigation.navigate('LeaveRequest')}
+              activeOpacity={0.85}
             >
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.addLeaveButtonText}>Request Leave</Text>
+              <Ionicons name="add" size={18} color="#453714" />
+              <Text style={styles.newRequestButtonText}>New Leave Request</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.requestsList}>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.headerCell, styles.dateColumn]}>Start Date</Text>
-              <Text style={[styles.headerCell, styles.dateColumn]}>End Date</Text>
-              <Text style={[styles.headerCell, styles.typeColumn]}>Leave Type</Text>
-              <Text style={[styles.headerCell, styles.reasonColumn]}>Reason</Text>
-              <Text style={[styles.headerCell, styles.statusColumn]}>Status</Text>
-            </View>
+          <>
+            {currentRequests.map((request, index) => {
+              const statusCfg = getStatusConfig(request.status);
+              return (
+                <View key={request.id || index} style={styles.requestCard}>
+                  {/* Card top row */}
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.cardDateWrap}>
+                      <View style={styles.cardIconWrap}>
+                        <Ionicons name="calendar-outline" size={16} color="#D4A574" />
+                      </View>
+                      <Text style={styles.cardDate}>{formatDate(request.startDate)}</Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
+                      <View style={[styles.statusDot, { backgroundColor: statusCfg.dot }]} />
+                      <Text style={[styles.statusText, { color: statusCfg.text }]}>
+                        {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
 
-            {/* Table Rows */}
-            {currentRequests.map((request, index) => (
-              <TouchableOpacity key={request.id || index} style={styles.tableRow}>
-                <Text style={[styles.cell, styles.dateColumn]}>
-                  {formatDate(request.startDate)}
-                </Text>
-                <Text style={[styles.cell, styles.dateColumn]}>
-                  {formatDate(request.endDate)}
-                </Text>
-                <Text style={[styles.cell, styles.typeColumn]}>
-                  {getLeaveTypeDisplayName(request.leaveType)}
-                </Text>
-                <Text 
-                  style={[styles.cell, styles.reasonColumn]} 
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
-                >
-                  {request.reason}
-                </Text>
-                <View style={[styles.cell, styles.statusColumn]}>
-                  <View 
-                    style={[
-                      styles.statusBadge, 
-                      { backgroundColor: getStatusColor(request.status) }
-                    ]}
-                  >
-                    <Text style={styles.statusText}>
-                      {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                    </Text>
+                  {/* Date Range and Leave Type */}
+                  <View style={styles.cardInfoRow}>
+                    <View style={styles.cardInfoItem}>
+                      <Text style={styles.cardInfoLabel}>START DATE</Text>
+                      <Text style={styles.cardInfoValue}>{formatDate(request.startDate)}</Text>
+                    </View>
+                    <View style={styles.cardInfoDivider} />
+                    <View style={styles.cardInfoItem}>
+                      <Text style={styles.cardInfoLabel}>END DATE</Text>
+                      <Text style={styles.cardInfoValue}>{formatDate(request.endDate)}</Text>
+                    </View>
+                  </View>
+
+                  {/* Leave Type Badge */}
+                  <View style={styles.leaveTypeBadge}>
+                    <Ionicons name="time-outline" size={14} color="#7C3AED" />
+                    <Text style={styles.leaveTypeText}>{getLeaveTypeDisplayName(request.leaveType)}</Text>
+                  </View>
+
+                  {/* Reason */}
+                  <View style={styles.cardReasonRow}>
+                    <Ionicons name="document-text-outline" size={14} color="#B5B0A4" />
+                    <Text style={styles.cardReason} numberOfLines={2}>{request.reason}</Text>
+                  </View>
+
+                  {/* Requested On */}
+                  <View style={styles.cardFooter}>
+                    <Ionicons name="time-outline" size={12} color="#B5B0A4" />
+                    <Text style={styles.cardFooterText}>Requested on {formatDate(request.requestedOn)}</Text>
                   </View>
                 </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+              );
+            })}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <View style={styles.pagination}>
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <Ionicons name="chevron-back" size={16} color={currentPage === 1 ? '#B5B0A4' : '#1C1B17'} />
+                </TouchableOpacity>
+                <Text style={styles.pageText}>{currentPage} / {totalPages}</Text>
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <Ionicons name="chevron-forward" size={16} color={currentPage === totalPages ? '#B5B0A4' : '#1C1B17'} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
+
+      {/* FAB */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => navigation.navigate('LeaveRequest')}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add" size={24} color="#453714" />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -635,227 +677,426 @@ const ViewLeaveRequests = () => {
 export default ViewLeaveRequests;
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
+  },
+  loadingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#6E6E6E',
+    fontWeight: '600',
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#15285cff',
+    backgroundColor: 'rgba(250, 249, 246, 0.92)',
     zIndex: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingOverlayTxt: { 
-    color: '#fff', 
-    marginTop: 8,
-    fontSize: 16,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    backgroundColor: '#1a1a2e',
-  },
-  backButton: {
-    padding: 5,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    flex: 1,
-    textAlign: 'center',
-  },
-  refreshButton: {
-    padding: 5,
-  },
-  filterContainer: {
-    backgroundColor: '#f3f4f723',
-    paddingVertical: 0,
-  },
-  filterScrollContent: {
-    paddingHorizontal: 0,
-  },
-  filterTab: {
-    flex: 1,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
-    minWidth: 100,
-    flexDirection: 'row',
-  },
-  activeFilterTab: {
-    borderBottomColor: '#007AFF',
-  },
-  filterTabText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-    marginRight: 8,
-  },
-  activeFilterTabText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
-  },
-  countBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  activeCountBadge: {
-    backgroundColor: '#007AFF',
-  },
-  countText: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  activeCountText: {
-    color: '#fff',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#f3f4f723',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  userInfoText: {
-    fontSize: 14,
-    color: '#fff',
-    marginLeft: 8,
-    fontStyle: 'italic',
-  },
-  content: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 50,
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#fff',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 50,
-    paddingHorizontal: 20,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 15,
-    textAlign: 'center',
-  },
-  emptySubText: {
-    fontSize: 14,
-    color: '#fff',
-    marginTop: 5,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-  addLeaveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 10,
-  },
-  addLeaveButtonText: {
-    color: '#fff',
+  loadingOverlayTxt: {
+    color: '#1C1B17',
+    marginTop: 12,
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: 8,
   },
-  requestsList: {
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F2F0E9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageLabelSmall: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7E7767',
+    letterSpacing: 1.4,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: -0.5,
+    textAlign: 'center',
+  },
+  refreshIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Hero Banner
+  heroBanner: {
+    backgroundColor: '#1C1B17',
+    borderRadius: 40,
+    padding: 32,
+    marginHorizontal: 24,
+    marginBottom: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.08,
+    shadowRadius: 40,
+    elevation: 8,
+  },
+  heroLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F5C451',
+    letterSpacing: 3.2,
+    marginBottom: 6,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  heroStats: {
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  heroStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 90,
+  },
+  heroStatDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  heroStatText: {
+    fontSize: 13,
+    color: '#D1CEC4',
+    fontWeight: '600',
+  },
+  heroDecoration: {
+    position: 'absolute',
+    top: -40,
+    right: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(245, 196, 81, 0.05)',
+  },
+
+  // Filter Tabs
+  filterRow: {
+    paddingHorizontal: 24,
+    marginBottom: 12,
+  },
+  filterScroll: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  filterTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 50,
+    backgroundColor: '#F2F0E9',
+  },
+  filterTabActive: {
+    backgroundColor: '#1C1B17',
+  },
+  filterTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7E7767',
+  },
+  filterTabTextActive: {
+    color: '#FFFFFF',
+  },
+  filterBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#E5E0D4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  filterBadgeActive: {
+    backgroundColor: '#F5C451',
+  },
+  filterBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7E7767',
+  },
+  filterBadgeTextActive: {
+    color: '#453714',
+  },
+
+  // Content
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
     paddingBottom: 100,
   },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#f3f4f723',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+
+  // States
+  centerState: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    gap: 12,
   },
-  headerCell: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
+  stateText: {
+    fontSize: 15,
+    color: '#7E7767',
+    fontWeight: '500',
   },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-    backgroundColor: '#f3f4f710',
+  emptyState: {
+    paddingVertical: 60,
+    alignItems: 'center',
   },
-  cell: {
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1C1B17',
+    marginBottom: 6,
+  },
+  emptySubtext: {
     fontSize: 13,
-    color: '#fff',
+    color: '#7E7767',
     textAlign: 'center',
-    alignSelf: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+    paddingHorizontal: 20,
   },
-  dateColumn: {
-    flex: 1.2,
+  newRequestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F5C451',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 50,
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 6,
   },
-  typeColumn: {
-    flex: 1,
+  newRequestButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#453714',
   },
-  reasonColumn: {
-    flex: 1.5,
+
+  // Request Card
+  requestCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 24,
+    elevation: 4,
   },
-  statusColumn: {
-    flex: 1,
+  cardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  cardDateWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  actionColumn: {
-    flex: 0.8,
-    alignItems: 'center',
+  cardDate: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 60,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 50,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
   },
-  deleteButton: {
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 242, 242, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(254, 202, 202, 0.3)',
+  cardInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  cardInfoItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  cardInfoDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E5E0D4',
+    marginHorizontal: 8,
+  },
+  cardInfoLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#B5B0A4',
+    letterSpacing: 1.2,
+    marginBottom: 3,
+  },
+  cardInfoValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+  leaveTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F3E8FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  leaveTypeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+  cardReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginBottom: 12,
+  },
+  cardReason: {
+    flex: 1,
+    fontSize: 13,
+    color: '#7E7767',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F2F0E9',
+  },
+  cardFooterText: {
+    fontSize: 11,
+    color: '#B5B0A4',
+    fontWeight: '500',
+  },
+
+  // Pagination
+  pagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    paddingVertical: 20,
+  },
+  pageButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  pageButtonDisabled: {
+    backgroundColor: '#F2F0E9',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  pageText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    bottom: 32,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F5C451',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
   },
 });

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMC API - cURL Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1C1B17 0%, #3a3834 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .alert {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+        }
+
+        .alert h3 {
+            color: #856404;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .alert p {
+            color: #856404;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .form-section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+        }
+
+        .form-section h2 {
+            color: #1C1B17;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #495057;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .command-section {
+            margin-top: 25px;
+        }
+
+        .command-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .command-header h3 {
+            color: #1C1B17;
+            font-size: 18px;
+        }
+
+        .command-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-bottom: 15px;
+        }
+
+        .command-box::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        .command-box::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 10px;
+        }
+
+        .command-box::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 10px;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        .info-box h4 {
+            color: #0d47a1;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .info-box ol {
+            margin-left: 20px;
+            color: #0d47a1;
+            font-size: 13px;
+            line-height: 1.8;
+        }
+
+        .postman-section {
+            background: #fff5e6;
+            border-left: 4px solid #ff6c37;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .postman-section h3 {
+            color: #ff6c37;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .postman-section p {
+            color: #663c00;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .postman-section strong {
+            color: #ff6c37;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 IMC API - cURL Generator</h1>
+            <p>Generate cURL commands to test your APIs without CORS issues</p>
+        </div>
+
+        <div class="content">
+            <!-- CORS Alert -->
+            <div class="alert">
+                <h3>⚠️ CORS Issue Detected</h3>
+                <p>The browser blocks direct API calls from HTML files. Use the generated cURL commands below in your terminal or import them into Postman/Thunder Client.</p>
+            </div>
+
+            <!-- Credentials Section -->
+            <div class="form-section">
+                <h2>🔐 Authentication</h2>
+                <div class="form-group">
+                    <label for="userId">User ID</label>
+                    <input type="text" id="userId" placeholder="Enter your user ID">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter your password">
+                </div>
+            </div>
+
+            <!-- API Selection Section -->
+            <div class="form-section">
+                <h2>📡 API Endpoint</h2>
+                <div class="form-group">
+                    <label for="apiEndpoint">Select API</label>
+                    <select id="apiEndpoint">
+                        <option value="/collections/">GET /collections/ - Load Collections</option>
+                        <option value="/clients">GET /clients - Load Customers</option>
+                        <option value="/departments">GET /departments - Load Branches</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="generateCommand()">
+                    🚀 Generate cURL Command
+                </button>
+            </div>
+
+            <!-- Command Section -->
+            <div class="command-section" id="commandSection" style="display: none;">
+                <div class="command-header">
+                    <h3>📋 cURL Command</h3>
+                    <button class="btn-success" onclick="copyCommand()">
+                        📋 Copy Command
+                    </button>
+                </div>
+                <div class="command-box" id="commandBox"></div>
+
+                <!-- How to Use -->
+                <div class="info-box">
+                    <h4>💡 How to Use:</h4>
+                    <ol>
+                        <li>Copy the cURL command above</li>
+                        <li>Open your terminal (Command Prompt, PowerShell, or Terminal)</li>
+                        <li>Paste and press Enter</li>
+                        <li>View the API response in your terminal</li>
+                    </ol>
+                </div>
+
+                <!-- Postman Instructions -->
+                <div class="postman-section">
+                    <h3>🔶 Use with Postman</h3>
+                    <p><strong>Method 1 - Import cURL:</strong></p>
+                    <p>1. Copy the cURL command above<br>
+                       2. Open Postman → Click "Import" → Select "Raw text"<br>
+                       3. Paste the cURL command → Click "Continue" → "Import"</p>
+                    
+                    <p style="margin-top: 15px;"><strong>Method 2 - Manual Setup:</strong></p>
+                    <p>1. Create new request in Postman<br>
+                       2. Set method to <strong>GET</strong><br>
+                       3. URL: <strong id="apiUrl"></strong><br>
+                       4. Go to "Authorization" tab → Select "Basic Auth"<br>
+                       5. Enter your User ID and Password<br>
+                       6. Click "Send"</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://myimc.in/app4/api';
+
+        function generateCommand() {
+            const userId = document.getElementById('userId').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const endpoint = document.getElementById('apiEndpoint').value;
+
+            // Validation
+            if (!userId || !password) {
+                alert('⚠️ Please enter both User ID and Password');
+                return;
+            }
+
+            // Create Basic Auth header
+            const authString = btoa(`${userId}:${password}`);
+            const fullUrl = `${API_BASE_URL}${endpoint}`;
+
+            // Generate cURL command
+            const curlCommand = `curl -X GET "${fullUrl}" \\
+  -H "Authorization: Basic ${authString}" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json"`;
+
+            // Display command
+            document.getElementById('commandBox').textContent = curlCommand;
+            document.getElementById('apiUrl').textContent = fullUrl;
+            document.getElementById('commandSection').style.display = 'block';
+
+            // Scroll to command
+            document.getElementById('commandSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function copyCommand() {
+            const commandText = document.getElementById('commandBox').textContent;
+            navigator.clipboard.writeText(commandText).then(() => {
+                alert('✓ cURL command copied to clipboard!');
+            });
+        }
+
+        // Allow Enter key to generate
+        document.getElementById('password').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                generateCommand();
+            }
+        });
+    </script>
+</body>
+</html>

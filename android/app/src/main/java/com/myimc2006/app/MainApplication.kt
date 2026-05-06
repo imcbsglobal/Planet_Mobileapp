@@ -1,4 +1,4 @@
-package com.adila2005.imcmobileapp
+package com.myimc2006.app
 
 import android.app.Application
 import android.content.res.Configuration

@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
 import {
@@ -10,12 +10,13 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
 interface LeaveRequestData {
@@ -34,64 +35,53 @@ interface UserCredentials {
 }
 
 const LeaveRequest = () => {
-  const router = useRouter();
-  const params = useLocalSearchParams();
-  
+  const navigation = useNavigation();
+  const route = useRoute();
+  const params = route.params || {};
+
   // Form state
   const [startDate, setStartDate] = useState(new Date());
   const [endDate, setEndDate] = useState(new Date());
   const [leaveType, setLeaveType] = useState('full_day');
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
-  
+
   // UI state
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showLeaveTypeModal, setShowLeaveTypeModal] = useState(false);
   const [showReasonModal, setShowReasonModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   // User credentials state
   const [userCredentials, setUserCredentials] = useState<UserCredentials>({
     userid: '',
-    password: ''
+    password: '',
   });
   const [isLoadingCredentials, setIsLoadingCredentials] = useState(true);
 
-  // Load user credentials on component mount
   useEffect(() => {
     const loadUserCredentials = async () => {
       try {
-        // Method 1: Try to get from route parameters first
         if (params.userid && params.password) {
           setUserCredentials({
             userid: params.userid as string,
-            password: params.password as string
+            password: params.password as string,
           });
           setIsLoadingCredentials(false);
           return;
         }
 
-        // Method 2: Try to get from secure storage
         const storedUserid = await SecureStore.getItemAsync('userId');
         const storedPassword = await SecureStore.getItemAsync('password');
-        
+
         if (storedUserid && storedPassword) {
-          setUserCredentials({
-            userid: storedUserid,
-            password: storedPassword
-          });
+          setUserCredentials({ userid: storedUserid, password: storedPassword });
         } else {
-          // Method 3: Fallback - show alert and go back
           Alert.alert(
             'Authentication Error',
             'User credentials not found. Please login again.',
-            [
-              {
-                text: 'OK',
-                onPress: () => router.back()
-              }
-            ]
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
           );
         }
       } catch (error) {
@@ -99,12 +89,7 @@ const LeaveRequest = () => {
         Alert.alert(
           'Error',
           'Failed to load user credentials. Please try again.',
-          [
-            {
-              text: 'OK',
-              onPress: () => router.back()
-            }
-          ]
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       } finally {
         setIsLoadingCredentials(false);
@@ -112,15 +97,10 @@ const LeaveRequest = () => {
     };
 
     loadUserCredentials();
-  }, [params.userid, params.password, router]);
+  }, [params.userid, params.password, navigation]);
 
-  // API Configuration
-  const API_CONFIG = {
-    baseUrl: 'https://myimc.in',
-    timeout: 15000,
-  };
+  const API_CONFIG = { baseUrl: 'https://myimc.in', timeout: 15000 };
 
-  // Leave type options
   const leaveTypeOptions = [
     { label: 'Full Day', value: 'full_day' },
     { label: 'Half Day - Morning', value: 'half_day_morning' },
@@ -128,7 +108,6 @@ const LeaveRequest = () => {
     { label: 'Hourly', value: 'hourly' },
   ];
 
-  // Reason options
   const reasonOptions = [
     { label: 'Medical Appointment', value: 'medical_appointment' },
     { label: 'Bereavement Leave', value: 'bereavement_leave' },
@@ -137,67 +116,44 @@ const LeaveRequest = () => {
     { label: 'Dependent Care', value: 'dependent_care' },
   ];
 
-  const formatDate = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-  };
+  const formatDate = (date: Date): string => date.toISOString().split('T')[0];
 
-  const formatDisplayDate = (date: Date): string => {
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+  const formatDisplayDate = (date: Date): string =>
+    date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-  // Enhanced date change handlers with better iOS handling
+  const getDurationDays = () =>
+    Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
   const handleStartDateChange = (event: any, selectedDate?: Date) => {
-    console.log('Start date event:', event.type, 'Platform:', Platform.OS);
-    
     if (Platform.OS === 'android') {
       setShowStartDatePicker(false);
-      
       if (event.type === 'set' && selectedDate) {
         setStartDate(selectedDate);
-        if (selectedDate > endDate) {
-          setEndDate(selectedDate);
-        }
+        if (selectedDate > endDate) setEndDate(selectedDate);
       }
     } else {
-      // iOS - only update date, don't close picker immediately
       if (selectedDate) {
         setStartDate(selectedDate);
-        if (selectedDate > endDate) {
-          setEndDate(selectedDate);
-        }
+        if (selectedDate > endDate) setEndDate(selectedDate);
       }
     }
   };
 
   const handleEndDateChange = (event: any, selectedDate?: Date) => {
-    console.log('End date event:', event.type, 'Platform:', Platform.OS);
-    
     if (Platform.OS === 'android') {
       setShowEndDatePicker(false);
-      
       if (event.type === 'set' && selectedDate) {
-        if (selectedDate >= startDate) {
-          setEndDate(selectedDate);
-        } else {
-          Alert.alert('Invalid Date', 'End date cannot be before start date');
-        }
+        if (selectedDate >= startDate) setEndDate(selectedDate);
+        else Alert.alert('Invalid Date', 'End date cannot be before start date');
       }
     } else {
       if (selectedDate) {
-        if (selectedDate >= startDate) {
-          setEndDate(selectedDate);
-        } else {
-          Alert.alert('Invalid Date', 'End date cannot be before start date');
-        }
+        if (selectedDate >= startDate) setEndDate(selectedDate);
+        else Alert.alert('Invalid Date', 'End date cannot be before start date');
       }
     }
   };
 
-  // Enhanced date picker with better error handling
   const renderDatePicker = (
     isVisible: boolean,
     value: Date,
@@ -218,40 +174,34 @@ const LeaveRequest = () => {
           minimumDate={minimumDate}
         />
       );
-    } else {
-      return (
-        <Modal
-          visible={isVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={onClose}
-        >
-          <View style={styles.datePickerModalOverlay}>
-            <View style={styles.datePickerModalContent}>
-              <View style={styles.datePickerHeader}>
-                <TouchableOpacity onPress={onClose}>
-                </TouchableOpacity>
-                <Text style={styles.datePickerTitle}>{title}</Text>
-                <TouchableOpacity onPress={onClose}>
-                  <Text style={styles.datePickerDoneText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.datePickerContainer}>
-                <DateTimePicker
-                  value={value}
-                  mode="date"
-                  display="spinner"
-                  onChange={onChange}
-                  minimumDate={minimumDate}
-                  textColor="#fff"
-                  themeVariant="dark"
-                />
-              </View>
-            </View>
-          </View>
-        </Modal>
-      );
     }
+
+    return (
+      <Modal visible={isVisible} transparent animationType="slide" onRequestClose={onClose}>
+        <Pressable style={styles.modalOverlay} onPress={onClose}>
+          <View style={styles.bottomSheet}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <TouchableOpacity onPress={onClose}>
+                <Text style={styles.bottomSheetCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.bottomSheetTitle}>{title}</Text>
+              <TouchableOpacity onPress={onClose}>
+                <Text style={styles.bottomSheetDone}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <DateTimePicker
+              value={value}
+              mode="date"
+              display="spinner"
+              onChange={onChange}
+              minimumDate={minimumDate}
+              themeVariant="light"
+            />
+          </View>
+        </Pressable>
+      </Modal>
+    );
   };
 
   const validateForm = (): boolean => {
@@ -259,29 +209,22 @@ const LeaveRequest = () => {
       Alert.alert('Authentication Error', 'User credentials not available. Please login again.');
       return false;
     }
-
     if (startDate > endDate) {
       Alert.alert('Validation Error', 'End date must be after or equal to start date');
       return false;
     }
-    
     if (!reason) {
       Alert.alert('Validation Error', 'Please select a reason for leave');
       return false;
     }
-    
     return true;
   };
 
-  // Updated API call with dynamic user credentials and note field
   const submitLeaveRequest = async () => {
     if (!validateForm()) return;
-    
     setIsSubmitting(true);
-    
-    // Get the readable reason text for submission
-    const selectedReason = reasonOptions.find(option => option.value === reason);
-    
+
+    const selectedReason = reasonOptions.find(o => o.value === reason);
     const requestData: LeaveRequestData = {
       userid: userCredentials.userid,
       password: userCredentials.password,
@@ -292,134 +235,68 @@ const LeaveRequest = () => {
       note: note.trim(),
     };
 
-    // Create timeout promise
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Request timeout')), API_CONFIG.timeout)
     );
 
     try {
-      console.log('Submitting leave request for user:', userCredentials.userid);
-      console.log('Request data:', { ...requestData, password: '[HIDDEN]' });
-      
       const fetchPromise = fetch(`${API_CONFIG.baseUrl}/flutter/leave/create/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(requestData),
       });
 
-      // Race between fetch and timeout
       const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
-
-      // Check if response is ok
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('Error response:', errorText);
         throw new Error(`HTTP ${response.status}: ${errorText || 'Unknown error'}`);
       }
 
-      // Parse JSON response
       const result = await response.json();
-      console.log('Success response:', result);
 
-      // Handle your API's response format
       if (result.success) {
-        Alert.alert(
-          'Success',
-          result.message || 'Leave request submitted successfully!',
-          [{ 
-            text: 'OK', 
-            onPress: () => {
-              // Reset form
-              setStartDate(new Date());
-              setEndDate(new Date());
-              setLeaveType('full_day');
-              setReason('');
-              setNote('');
-              router.back();
-            }
-          }]
-        );
+        Alert.alert('Success', result.message || 'Leave request submitted successfully!', [{
+          text: 'OK',
+          onPress: () => {
+            setStartDate(new Date());
+            setEndDate(new Date());
+            setLeaveType('full_day');
+            setReason('');
+            setNote('');
+            navigation.goBack();
+          },
+        }]);
       } else {
-        // Handle API error response
         throw new Error(result.message || 'Request failed');
       }
-
     } catch (error) {
-      console.error('Error submitting leave request:', error);
-      
       let errorMessage = 'An unexpected error occurred. Please try again.';
-      
       if (error instanceof Error) {
-        if (error.message === 'Request timeout') {
-          errorMessage = 'Request timed out. Please check your internet connection and try again.';
-        } else if (error.message.includes('Network request failed')) {
-          errorMessage = 'Network connection failed. Please check your internet connection and try again.';
-        } else if (error.message.includes('HTTP 401')) {
-          errorMessage = 'Authentication failed. Please check your credentials and login again.';
-        } else if (error.message.includes('HTTP 403')) {
-          errorMessage = 'Access denied. You may not have permission to submit leave requests.';
-        } else if (error.message.includes('HTTP 4')) {
-          errorMessage = 'Invalid request. Please check your details and try again.';
-        } else if (error.message.includes('HTTP 5')) {
-          errorMessage = 'Server error. Please try again later.';
-        } else {
-          errorMessage = error.message;
-        }
+        if (error.message === 'Request timeout') errorMessage = 'Request timed out. Please check your internet connection.';
+        else if (error.message.includes('Network request failed')) errorMessage = 'Network connection failed. Please check your internet connection.';
+        else if (error.message.includes('HTTP 401')) errorMessage = 'Authentication failed. Please login again.';
+        else if (error.message.includes('HTTP 403')) errorMessage = 'Access denied. You may not have permission to submit leave requests.';
+        else if (error.message.includes('HTTP 4')) errorMessage = 'Invalid request. Please check your details and try again.';
+        else if (error.message.includes('HTTP 5')) errorMessage = 'Server error. Please try again later.';
+        else errorMessage = error.message;
       }
-      
-      Alert.alert(
-        'Submission Failed',
-        errorMessage,
-        [
-          { text: 'Retry', onPress: submitLeaveRequest },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
+      Alert.alert('Submission Failed', errorMessage, [
+        { text: 'Retry', onPress: submitLeaveRequest },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // For testing purposes - simulate successful submission
-  const submitLeaveRequestMock = async () => {
-    if (!validateForm()) return;
-    
-    setIsSubmitting(true);
-    
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsSubmitting(false);
-    
-    Alert.alert(
-      'Success (Mock)',
-      `Leave request submitted successfully for user: ${userCredentials.userid}! (This is a mock submission for testing)`,
-      [{ 
-        text: 'OK', 
-        onPress: () => {
-          setStartDate(new Date());
-          setEndDate(new Date());
-          setLeaveType('full_day');
-          setReason('');
-          setNote('');
-          router.back();
-        }
-      }]
-    );
-  };
-
   const handleClose = () => {
-    const hasChanges = reason !== '' || 
-                      note !== '' ||
-                      startDate.toDateString() !== new Date().toDateString() ||
-                      endDate.toDateString() !== new Date().toDateString() ||
-                      leaveType !== 'full_day';
+    const hasChanges =
+      reason !== '' ||
+      note !== '' ||
+      startDate.toDateString() !== new Date().toDateString() ||
+      endDate.toDateString() !== new Date().toDateString() ||
+      leaveType !== 'full_day';
 
     if (hasChanges) {
       Alert.alert(
@@ -427,34 +304,32 @@ const LeaveRequest = () => {
         'You have unsaved changes. Are you sure you want to close?',
         [
           { text: 'Continue Editing', style: 'cancel' },
-          { text: 'Discard', style: 'destructive', onPress: () => router.back() },
+          { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
         ]
       );
     } else {
-      router.back();
+      navigation.goBack();
     }
   };
 
-  // Show loading screen while credentials are being loaded
   if (isLoadingCredentials) {
     return (
-      <View style={[styles.container, styles.loadingScreen]}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color="#F5C451" />
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
 
-  // Show error if no credentials available
   if (!userCredentials.userid || !userCredentials.password) {
     return (
-      <View style={[styles.container, styles.errorScreen]}>
-        <Ionicons name="warning-outline" size={48} color="#ff6b6b" />
+      <View style={styles.errorScreen}>
+        <View style={styles.errorIconWrap}>
+          <Ionicons name="warning-outline" size={32} color="#D4A574" />
+        </View>
         <Text style={styles.errorTitle}>Authentication Required</Text>
-        <Text style={styles.errorMessage}>
-          Please login to submit leave requests.
-        </Text>
-        <TouchableOpacity style={styles.errorButton} onPress={() => router.back()}>
+        <Text style={styles.errorMessage}>Please login to submit leave requests.</Text>
+        <TouchableOpacity style={styles.errorButton} onPress={() => navigation.goBack()}>
           <Text style={styles.errorButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -462,227 +337,296 @@ const LeaveRequest = () => {
   }
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-    >
+    <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
+          <Ionicons name="arrow-back" size={20} color="#1C1B17" />
         </TouchableOpacity>
+        <View>
+          <Text style={styles.pageLabelSmall}>FORM</Text>
+          <Text style={styles.pageTitle}>Leave Request</Text>
+        </View>
+        <View style={{ width: 40 }} />
       </View>
 
-      <Text style={styles.pageTitle}>LEAVE REQUEST</Text>
-      
-      <ScrollView 
-        style={styles.scrollView} 
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollViewContent}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.form}>
-          {/* Start Date */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Start Date *</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Hero Banner */}
+          <View style={styles.heroBanner}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroLabel}>PLAN YOUR TIME OFF</Text>
+              <Text style={styles.heroTitle}>Request{'\n'}a leave</Text>
+            </View>
+            <View style={styles.heroIconWrap}>
+              <Ionicons name="sunny" size={32} color="#F5C451" />
+            </View>
+            <View style={styles.heroDecoration} />
+          </View>
+
+          {/* Duration Pill */}
+          <View style={styles.durationPill}>
+            <Ionicons name="time-outline" size={16} color="#D4A574" />
+            <Text style={styles.durationText}>
+              Duration: <Text style={styles.durationBold}>{getDurationDays()} day{getDurationDays() !== 1 ? 's' : ''}</Text>
+            </Text>
+          </View>
+
+          {/* Dates Card */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>DATE RANGE</Text>
+
+            {/* Start Date */}
             <TouchableOpacity
-              style={styles.dateInput}
+              style={styles.inputRow}
               onPress={() => setShowStartDatePicker(true)}
+              activeOpacity={0.7}
             >
-              <Text style={styles.dateText}>
-                {formatDisplayDate(startDate)}
-              </Text>
-              <Ionicons name="calendar-outline" size={20} color="#007AFF" />
+              <View style={styles.inputIconWrap}>
+                <Ionicons name="calendar-outline" size={20} color="#D4A574" />
+              </View>
+              <View style={styles.inputTextGroup}>
+                <Text style={styles.inputFieldLabel}>START DATE</Text>
+                <Text style={styles.inputValue}>{formatDisplayDate(startDate)}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#7E7767" />
             </TouchableOpacity>
-          </View>
 
-          {/* End Date */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>End Date *</Text>
+            <View style={styles.fieldDivider} />
+
+            {/* End Date */}
             <TouchableOpacity
-              style={styles.dateInput}
+              style={styles.inputRow}
               onPress={() => setShowEndDatePicker(true)}
+              activeOpacity={0.7}
             >
-              <Text style={styles.dateText}>
-                {formatDisplayDate(endDate)}
-              </Text>
-              <Ionicons name="calendar-outline" size={20} color="#007AFF" />
+              <View style={styles.inputIconWrap}>
+                <Ionicons name="calendar" size={20} color="#D4A574" />
+              </View>
+              <View style={styles.inputTextGroup}>
+                <Text style={styles.inputFieldLabel}>END DATE</Text>
+                <Text style={styles.inputValue}>{formatDisplayDate(endDate)}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#7E7767" />
             </TouchableOpacity>
           </View>
 
-          {/* Leave Duration Info */}
-          <View style={styles.infoContainer}>
-            <Ionicons name="information-circle-outline" size={16} color="#fff" />
-            <Text style={styles.infoText}>
-              Duration: {Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1} day(s)
-            </Text>
-          </View>
+          {/* Details Card */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>LEAVE DETAILS</Text>
 
-          {/* Leave Type */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Leave Type *</Text>
+            {/* Leave Type */}
             <TouchableOpacity
-              style={styles.dropdownInput}
+              style={styles.inputRow}
               onPress={() => setShowLeaveTypeModal(true)}
+              activeOpacity={0.7}
             >
-              <Text style={styles.dropdownText}>
-                {leaveTypeOptions.find(option => option.value === leaveType)?.label}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#007AFF" />
+              <View style={styles.inputIconWrap}>
+                <Ionicons name="layers-outline" size={20} color="#D4A574" />
+              </View>
+              <View style={styles.inputTextGroup}>
+                <Text style={styles.inputFieldLabel}>LEAVE TYPE</Text>
+                <Text style={styles.inputValue}>
+                  {leaveTypeOptions.find(o => o.value === leaveType)?.label}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#7E7767" />
             </TouchableOpacity>
-          </View>
 
-          {/* Reason */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Reason *</Text>
+            <View style={styles.fieldDivider} />
+
+            {/* Reason */}
             <TouchableOpacity
-              style={styles.dropdownInput}
+              style={styles.inputRow}
               onPress={() => setShowReasonModal(true)}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.dropdownText, !reason && styles.placeholderText]}>
-                {reason ? reasonOptions.find(option => option.value === reason)?.label : 'Select reason for leave'}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#007AFF" />
+              <View style={styles.inputIconWrap}>
+                <Ionicons name="document-text-outline" size={20} color="#D4A574" />
+              </View>
+              <View style={styles.inputTextGroup}>
+                <Text style={styles.inputFieldLabel}>REASON</Text>
+                <Text style={[styles.inputValue, !reason && styles.inputPlaceholder]}>
+                  {reason
+                    ? reasonOptions.find(o => o.value === reason)?.label
+                    : 'Select reason for leave'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#7E7767" />
             </TouchableOpacity>
           </View>
 
-          {/* Note Field */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.label}>Additional Note</Text>
-            <TextInput
-              style={styles.textAreaInput}
-              multiline
-              numberOfLines={4}
-              placeholder="Add any additional information about your leave request..."
-              placeholderTextColor="#999"
-              value={note}
-              onChangeText={setNote}
-              maxLength={500}
-              textAlignVertical="top"
-            />
-            <Text style={styles.characterCount}>
-              {note.length}/500 characters
-            </Text>
+          {/* Note Card */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionCardTitle}>ADDITIONAL NOTE</Text>
+            <View style={styles.noteInputWrap}>
+              <TextInput
+                style={styles.noteInput}
+                multiline
+                numberOfLines={4}
+                placeholder="Add any additional information about your leave request..."
+                placeholderTextColor="#B5B0A4"
+                value={note}
+                onChangeText={setNote}
+                maxLength={500}
+                textAlignVertical="top"
+              />
+            </View>
+            <Text style={styles.characterCount}>{note.length}/500</Text>
           </View>
 
-          {/* Action Buttons */}
-          <View style={styles.actionContainer}>
-            <TouchableOpacity
-              style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-              onPress={submitLeaveRequest}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color="#fff" />
-                  <Text style={styles.loadingText}>Submitting...</Text>
-                </View>
-              ) : (
-                <Text style={styles.submitButtonText}>Submit Request</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
+          {/* Submit Button */}
+          <TouchableOpacity
+            style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+            onPress={submitLeaveRequest}
+            disabled={isSubmitting}
+            activeOpacity={0.85}
+          >
+            {isSubmitting ? (
+              <View style={styles.submitRow}>
+                <ActivityIndicator size="small" color="#453714" />
+                <Text style={styles.submitText}>Submitting...</Text>
+              </View>
+            ) : (
+              <View style={styles.submitRow}>
+                <Ionicons name="send" size={18} color="#453714" />
+                <Text style={styles.submitText}>Submit Request</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Date Pickers */}
       {renderDatePicker(
-        showStartDatePicker,
-        startDate,
-        handleStartDateChange,
-        new Date(),
-        "Select Start Date",
-        () => setShowStartDatePicker(false)
+        showStartDatePicker, startDate, handleStartDateChange,
+        new Date(), 'Select Start Date', () => setShowStartDatePicker(false)
       )}
-
       {renderDatePicker(
-        showEndDatePicker,
-        endDate,
-        handleEndDateChange,
-        startDate,
-        "Select End Date", 
-        () => setShowEndDatePicker(false)
+        showEndDatePicker, endDate, handleEndDateChange,
+        startDate, 'Select End Date', () => setShowEndDatePicker(false)
       )}
 
-      {/* Leave Type Modal */}
+      {/* Leave Type Bottom Sheet */}
       <Modal
         visible={showLeaveTypeModal}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setShowLeaveTypeModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Leave Type</Text>
-            {leaveTypeOptions.map((option) => (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  styles.modalOption,
-                  leaveType === option.value && styles.modalOptionSelected,
-                ]}
-                onPress={() => {
-                  setLeaveType(option.value);
-                  setShowLeaveTypeModal(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.modalOptionText,
-                    leaveType === option.value && styles.modalOptionTextSelected,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-                {leaveType === option.value && (
-                  <Ionicons name="checkmark" size={20} color="#007AFF" />
-                )}
+        <Pressable style={styles.modalOverlay} onPress={() => setShowLeaveTypeModal(false)}>
+          <View style={styles.bottomSheet}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <TouchableOpacity onPress={() => setShowLeaveTypeModal(false)}>
+                <Text style={styles.bottomSheetCancel}>Cancel</Text>
               </TouchableOpacity>
-            ))}
+              <Text style={styles.bottomSheetTitle}>Leave Type</Text>
+              <TouchableOpacity onPress={() => setShowLeaveTypeModal(false)}>
+                <Text style={styles.bottomSheetDone}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {leaveTypeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.sheetOption,
+                    leaveType === option.value && styles.sheetOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setLeaveType(option.value);
+                    setShowLeaveTypeModal(false);
+                  }}
+                >
+                  <View style={[
+                    styles.sheetOptionIcon,
+                    leaveType === option.value && styles.sheetOptionIconSelected,
+                  ]}>
+                    <Ionicons
+                      name={leaveType === option.value ? 'checkmark' : 'ellipse-outline'}
+                      size={16}
+                      color={leaveType === option.value ? '#453714' : '#7E7767'}
+                    />
+                  </View>
+                  <Text style={[
+                    styles.sheetOptionText,
+                    leaveType === option.value && styles.sheetOptionTextSelected,
+                  ]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 20 }} />
+            </ScrollView>
           </View>
-        </View>
+        </Pressable>
       </Modal>
 
-      {/* Reason Modal */}
+      {/* Reason Bottom Sheet */}
       <Modal
         visible={showReasonModal}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setShowReasonModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Reason</Text>
-            {reasonOptions.map((option) => (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  styles.modalOption,
-                  reason === option.value && styles.modalOptionSelected,
-                ]}
-                onPress={() => {
-                  setReason(option.value);
-                  setShowReasonModal(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.modalOptionText,
-                    reason === option.value && styles.modalOptionTextSelected,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-                {reason === option.value && (
-                  <Ionicons name="checkmark" size={20} color="#007AFF" />
-                )}
+        <Pressable style={styles.modalOverlay} onPress={() => setShowReasonModal(false)}>
+          <View style={styles.bottomSheet}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeader}>
+              <TouchableOpacity onPress={() => setShowReasonModal(false)}>
+                <Text style={styles.bottomSheetCancel}>Cancel</Text>
               </TouchableOpacity>
-            ))}
+              <Text style={styles.bottomSheetTitle}>Reason</Text>
+              <TouchableOpacity onPress={() => setShowReasonModal(false)}>
+                <Text style={styles.bottomSheetDone}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {reasonOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.sheetOption,
+                    reason === option.value && styles.sheetOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setReason(option.value);
+                    setShowReasonModal(false);
+                  }}
+                >
+                  <View style={[
+                    styles.sheetOptionIcon,
+                    reason === option.value && styles.sheetOptionIconSelected,
+                  ]}>
+                    <Ionicons
+                      name={reason === option.value ? 'checkmark' : 'ellipse-outline'}
+                      size={16}
+                      color={reason === option.value ? '#453714' : '#7E7767'}
+                    />
+                  </View>
+                  <Text style={[
+                    styles.sheetOptionText,
+                    reason === option.value && styles.sheetOptionTextSelected,
+                  ]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 20 }} />
+            </ScrollView>
           </View>
-        </View>
+        </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -691,275 +635,364 @@ export default LeaveRequest;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FAF9F6',
   },
   loadingScreen: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FAF9F6',
   },
   loadingText: {
-    color: '#fff',
+    marginTop: 12,
     fontSize: 16,
-    marginTop: 10,
+    color: '#6E6E6E',
+    fontWeight: '600',
   },
   errorScreen: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FAF9F6',
     padding: 40,
   },
-  errorTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  errorMessage: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 30,
-    lineHeight: 22,
-  },
-  errorButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  errorButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  header: {
-    paddingTop: 50,
-    paddingHorizontal: 20,
-  },
-  pageTitle: {
-    textAlign: 'center',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginVertical: 20,
-    color: '#fff',
-  },
-  userInfoContainer: {
-    backgroundColor: 'rgba(0, 122, 255, 0.2)',
-    marginHorizontal: 20,
-    marginBottom: 10,
-    padding: 12,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
-  },
-  userInfoText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollViewContent: {
-    flexGrow: 1,
-    paddingBottom: 20,
-  },
-  form: {
-    backgroundColor: '#f3f4f723',
-    borderRadius: 15,
-    padding: 20,
-    margin: 20,
-  },
-  fieldContainer: {
+  errorIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 20,
   },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1C1B17',
     marginBottom: 8,
   },
-  dateInput: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  dropdownInput: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  placeholderText: {
-    color: '#999',
-  },
-  textAreaInput: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#333',
-    minHeight: 100,
-  },
-  characterCount: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginTop: 5,
-  },
-  infoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(212, 228, 229, 0.42)',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  infoText: {
+  errorMessage: {
     fontSize: 14,
-    color: '#fff',
-    marginLeft: 8,
+    color: '#7E7767',
+    textAlign: 'center',
+    marginBottom: 28,
+    lineHeight: 20,
   },
-  actionContainer: {
+  errorButton: {
+    backgroundColor: '#1C1B17',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 50,
+  },
+  errorButtonText: {
+    color: '#F5C451',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+
+  // Header
+  header: {
     flexDirection: 'row',
-    marginTop: 10,
-    gap: 15,
-  },
-  closeActionButton: {
-    flex: 1,
-    backgroundColor: '#b9c2ca96',
-    paddingVertical: 15,
-    borderRadius: 8,
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
-  closeButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  submitButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    paddingVertical: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F2F0E9',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
-    backgroundColor: '#1a1a2e',
-    borderRadius: 12,
-    padding: 20,
-    margin: 20,
-    minWidth: 280,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 15,
+  pageLabelSmall: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7E7767',
+    letterSpacing: 1.4,
+    marginBottom: 2,
     textAlign: 'center',
   },
-  modalOption: {
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: -0.5,
+    textAlign: 'center',
+  },
+
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 100,
+  },
+
+  // Hero Banner
+  heroBanner: {
+    backgroundColor: '#1C1B17',
+    borderRadius: 40,
+    padding: 40,
+    marginBottom: 16,
+    overflow: 'hidden',
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.08,
+    shadowRadius: 40,
+    elevation: 8,
   },
-  modalOptionSelected: {
-    backgroundColor: 'rgba(0, 122, 255, 0.2)',
+  heroLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F5C451',
+    letterSpacing: 3.2,
+    marginBottom: 8,
   },
-  modalOptionText: {
-    fontSize: 16,
-    color: '#fff',
+  heroTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    lineHeight: 34,
   },
-  modalOptionTextSelected: {
-    color: '#007AFF',
+  heroIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(245, 196, 81, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  heroDecoration: {
+    position: 'absolute',
+    top: -48,
+    right: -48,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(245, 196, 81, 0.05)',
+  },
+
+  // Duration pill
+  durationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF8E7',
+    borderRadius: 50,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
+  },
+  durationText: {
+    fontSize: 13,
+    color: '#7E7767',
     fontWeight: '500',
   },
-  datePickerModalOverlay: {
+  durationBold: {
+    color: '#1C1B17',
+    fontWeight: '700',
+  },
+
+  // Section Cards
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.06,
+    shadowRadius: 40,
+    elevation: 6,
+  },
+  sectionCardTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7E7767',
+    letterSpacing: 2,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+  fieldDivider: {
+    height: 1,
+    backgroundColor: '#F2F0E9',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  inputIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inputTextGroup: {
+    flex: 1,
+  },
+  inputFieldLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#B5B0A4',
+    letterSpacing: 1.5,
+    marginBottom: 3,
+  },
+  inputValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1B17',
+  },
+  inputPlaceholder: {
+    color: '#B5B0A4',
+    fontWeight: '400',
+  },
+
+  // Note input
+  noteInputWrap: {
+    backgroundColor: '#FAF9F6',
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 4,
+  },
+  noteInput: {
+    fontSize: 14,
+    color: '#1C1B17',
+    minHeight: 90,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    lineHeight: 22,
+  },
+  characterCount: {
+    fontSize: 11,
+    color: '#B5B0A4',
+    textAlign: 'right',
+    paddingBottom: 12,
+    fontWeight: '500',
+  },
+
+  // Submit Button
+  submitButton: {
+    backgroundColor: '#F5C451',
+    borderRadius: 50,
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#E5E0D4',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  submitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  submitText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#453714',
+  },
+
+  // Bottom Sheet (Modal)
+  modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
-  datePickerModalContent: {
-    backgroundColor: '#1a1a2e',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+  bottomSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
+    elevation: 12,
   },
-  datePickerHeader: {
+  bottomSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E5E0D4',
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  bottomSheetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    backgroundColor: '#1a1a2e',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderBottomColor: '#F2F0E9',
+    marginBottom: 8,
   },
-  datePickerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  datePickerCancelText: {
+  bottomSheetTitle: {
     fontSize: 16,
-    color: '#fff',
+    fontWeight: '800',
+    color: '#1C1B17',
   },
-  datePickerDoneText: {
-    fontSize: 16,
-    color: '#007AFF',
+  bottomSheetCancel: {
+    fontSize: 14,
+    color: '#7E7767',
     fontWeight: '600',
   },
-  datePickerContainer: {
-    backgroundColor: '#1a1a2e',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    margin: 15,
+  bottomSheetDone: {
+    fontSize: 14,
+    color: '#D4A574',
+    fontWeight: '700',
+  },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    marginBottom: 4,
+  },
+  sheetOptionSelected: {
+    backgroundColor: '#FEF8E7',
+  },
+  sheetOptionIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F2F0E9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sheetOptionIconSelected: {
+    backgroundColor: '#F5C451',
+  },
+  sheetOptionText: {
+    fontSize: 15,
+    color: '#1C1B17',
+    fontWeight: '500',
+    flex: 1,
+  },
+  sheetOptionTextSelected: {
+    fontWeight: '700',
   },
 });

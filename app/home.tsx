@@ -1,10 +1,10 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Animated,
+  Pressable,
 } from 'react-native';
 
 interface UserCredentials {
@@ -34,10 +36,11 @@ interface UserProfile {
 interface GridItem {
   id: string;
   title: string;
-  description: string;
+  value: string;
   icon: string;
   route: string;
-  color: string;
+  showProgress?: boolean;
+  progressValue?: number;
 }
 
 export default function Home() {
@@ -53,105 +56,92 @@ export default function Home() {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedAttendance, setSelectedAttendance] = useState<any>(null);
+  const [monthlyAttendance, setMonthlyAttendance] = useState<any[]>([]);
+  const liveAnim = useRef(new Animated.Value(1)).current;
+  const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isFetchingAttendance = useRef(false);
 
-  // Grid items configuration
   const gridItems: GridItem[] = [
     {
       id: '1',
-      title: 'ATTENDANCE',
-      description: 'Manage attendance & requests',
-      icon: 'calendar',
+      title: 'Attendance',
+      value: 'Manage Attendance',
+      icon: 'time-outline',
       route: 'dashboard',
-      color: '#4CAF50'
     },
     {
       id: '2',
-      title: 'COLLECTION',
-      description:'Manage your collections',
-      icon:'cash',
-      route:'collection',
-      color: '#FF9800'
+      title: 'Collection',
+      value: 'Manage Collection',
+      icon: 'wallet-outline',
+      route: 'collection',
     },
     {
       id: '3',
-      title: 'FEEDER',
-      description: 'Manage feeder operations',
-      icon: 'flash',
+      title: 'Feeder',
+      value: 'Manage Feeder',
+      icon: 'git-network-outline',
       route: 'feeder',
-      color: '#2196F3'
     },
     {
       id: '4',
-      title: 'FUEL',
-      description: 'Fuel management & tracking',
-      icon: 'flame',
+      title: 'Fuel',
+      value: 'Manage Fuel',
+      icon: 'water-outline',
       route: 'fuel',
-      color: '#FF5722'
     },
     {
       id: '5',
-      title: 'LEADS',
-      description: 'Manage customer leads',
-      icon: 'people',
+      title: 'Leads',
+      value: 'Manage Leads',
+      icon: 'people-outline',
       route: 'leads',
-      color: '#9C27B0'
     },
     {
       id: '6',
-      title: 'TARGET',
-      description: 'Track targets & goals',
-      icon: 'trending-up',
+      title: 'Target',
+      value: 'Manage Target',
+      icon: 'radio-button-on-outline',
       route: 'target',
-      color: '#009688'
     },
   ];
+
+  const dates = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setDate(date.getDate() - 3 + i);
+    return date;
+  });
 
   const getUserSpecificKey = (baseKey: string) => {
     return userCredentials?.userId ? `${baseKey}_${userCredentials.userId}` : baseKey;
   };
 
-  // Enhanced image URL validation and processing
   const processImageUrl = (imageUrl: string): string | null => {
     if (!imageUrl) return null;
-    
     const cleanUrl = imageUrl.trim();
-    
-    if (cleanUrl.startsWith('http')) {
-      return cleanUrl;
-    }
-    
-    if (cleanUrl.startsWith('/')) {
-      return `https://myimc.in${cleanUrl}`;
-    }
-    
+    if (cleanUrl.startsWith('http')) return cleanUrl;
+    if (cleanUrl.startsWith('/')) return `https://myimc.in${cleanUrl}`;
     return `https://myimc.in/${cleanUrl}`;
   };
 
-  // Function to handle profile image loading
   const handleProfileImageLoading = async (userProfile: UserProfile) => {
     if (!userCredentials?.userId) return;
-
     const imageUrl = userProfile.image_url || userProfile.image;
     const processedImageUrl = processImageUrl(imageUrl);
-    
     if (processedImageUrl) {
-      console.log('Setting profile image URL:', processedImageUrl);
       setProfileImageUri(processedImageUrl);
       setImageLoadError(false);
     } else {
-      console.log('No valid image URL found');
       setImageLoadError(true);
       setProfileImageUri(null);
     }
   };
 
-  // Function to fetch user profile from API
   const fetchUserProfile = async () => {
     if (!userCredentials?.userId) return;
-    
     try {
-      console.log('Fetching user profile for userId:', userCredentials.userId);
-      
       const response = await fetch('https://myimc.in/flutter/users/', {
         method: 'GET',
         headers: {
@@ -163,62 +153,86 @@ export default function Home() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('API Response received, users count:', data.length);
-        
         const currentUserProfile = data.find((user: UserProfile) => 
           user.userid === userCredentials.userId
         );
         
         if (currentUserProfile) {
-          console.log('User profile found:', {
-            name: currentUserProfile.name,
-            image: currentUserProfile.image,
-            image_url: currentUserProfile.image_url
-          });
-          
           setUserProfile(currentUserProfile);
           setUsername(currentUserProfile.name);
-          
           await handleProfileImageLoading(currentUserProfile);
-          
           const profileKey = getUserSpecificKey('user_profile');
           await AsyncStorage.setItem(profileKey, JSON.stringify(currentUserProfile));
         } else {
-          console.log('User profile not found for userId:', userCredentials.userId);
           await loadStoredUserProfile();
         }
       } else {
-        console.error('Failed to fetch user profile:', response.status, response.statusText);
         await loadStoredUserProfile();
       }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
       await loadStoredUserProfile();
     }
   };
 
-  // Function to load stored user profile
+  const fetchMonthlyAttendance = async () => {
+    if (!userCredentials?.userId || !userCredentials?.password) return;
+    if (isFetchingAttendance.current) return; // skip if previous request still in-flight
+
+    isFetchingAttendance.current = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+    try {
+      const month = selectedDate.getMonth() + 1;
+      const year = selectedDate.getFullYear();
+
+      const response = await fetch(
+        `https://myimc.in/flutter/attendance/monthly/?userid=${userCredentials.userId}&password=${userCredentials.password}&month=${month}&year=${year}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setMonthlyAttendance(data.attendance_records);
+          updateSelectedAttendance(data.attendance_records, selectedDate);
+        }
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.warn('Attendance fetch skipped:', error?.message);
+      }
+    } finally {
+      clearTimeout(timeout);
+      isFetchingAttendance.current = false;
+    }
+  };
+
+  const updateSelectedAttendance = (records: any[], date: Date) => {
+    const dateString = date.toISOString().split('T')[0];
+    const record = records.find((r: any) => r.date === dateString);
+    setSelectedAttendance(record || null);
+  };
+
   const loadStoredUserProfile = async () => {
     if (!userCredentials?.userId) return;
-    
     try {
       const profileKey = getUserSpecificKey('user_profile');
       const storedProfile = await AsyncStorage.getItem(profileKey);
       if (storedProfile) {
         const parsedProfile = JSON.parse(storedProfile);
-        console.log('Loaded stored profile:', parsedProfile.name);
-        
         setUserProfile(parsedProfile);
         setUsername(parsedProfile.name);
-        
-        await loadCachedImage(userCredentials.userId);
       }
     } catch (error) {
       console.error('Error loading stored user profile:', error);
     }
   };
 
-  // Enhanced function to check login status and get credentials
   const initializeUser = async () => {
     try {
       const [userId, password, storedUsername] = await Promise.all([
@@ -226,7 +240,6 @@ export default function Home() {
         SecureStore.getItemAsync('password'),
         SecureStore.getItemAsync('username')
       ]);
-      console.log(userId, password, storedUsername)
       if (userId && password) {
         setUserCredentials({ userId, password });
         if (storedUsername) {
@@ -234,25 +247,12 @@ export default function Home() {
         }
         return true;
       } else {
-        console.log('No credentials found, redirecting to login');
         router.replace('/login');
         return false;
       }
     } catch (error) {
-      console.error('Error initializing user:', error);
       router.replace('/login');
       return false;
-    }
-  };
-
-  // Function to clear cached image
-  const clearCachedImage = async (userId: string) => {
-    try {
-      const imageMetadataKey = `profile_image_metadata_${userId}`;
-      await AsyncStorage.removeItem(imageMetadataKey);
-      console.log('Cached image metadata cleared');
-    } catch (error) {
-      console.error('Error clearing cached image metadata:', error);
     }
   };
 
@@ -260,33 +260,21 @@ export default function Home() {
     setRefreshing(true);
     setImageLoadError(false);
     setProfileImageUri(null);
-    
-    if (userCredentials?.userId) {
-      await clearCachedImage(userCredentials.userId);
-    }
-    
-    fetchUserProfile().finally(() => setRefreshing(false));
-  }, [userCredentials]);
+    await Promise.all([fetchUserProfile(), fetchMonthlyAttendance()]);
+    setRefreshing(false);
+  }, [userCredentials, selectedDate]);
 
-  // Enhanced logout function
   const handleLogout = async () => {
     Alert.alert(
       'Logout', 
-      'Are you sure you want to logout? You will need to enter your credentials again.', 
+      'Are you sure you want to logout?', 
       [
-        { 
-          text: 'Cancel', 
-          style: 'cancel' 
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
             try {
-              if (userCredentials?.userId) {
-                await clearCachedImage(userCredentials.userId);
-              }
-              
               await Promise.all([
                 SecureStore.deleteItemAsync('userId'),
                 SecureStore.deleteItemAsync('password'),
@@ -298,28 +286,15 @@ export default function Home() {
                 await AsyncStorage.removeItem(profileKey);
               }
               
-              try {
-                await AsyncStorage.multiRemove([
-                  'user_profile',
-                  'cached_attendance',
-                  'last_sync_time'
-                ]);
-              } catch (clearError) {
-                console.log('Some cached data could not be cleared:', clearError);
-              }
-              
               setUserCredentials(null);
               setUsername('User');
               setUserProfile(null);
               setShowProfileCard(false);
               setImageLoadError(false);
               setProfileImageUri(null);
-              setIsImageLoading(false);
               
               router.replace('/login');
-              
             } catch (logoutError) {
-              console.error('Error during logout:', logoutError);
               Alert.alert('Logout Error', 'There was an issue logging out. Please try again.');
             }
           },
@@ -328,7 +303,6 @@ export default function Home() {
     );
   };
 
-  // Navigation handlers
   const handleGridItemPress = async (route: string) => {
     if (loadingTab) return;
     setLoadingTab(route);
@@ -337,402 +311,790 @@ export default function Home() {
     setLoadingTab(null);
   };
 
-  const renderProfileImage = (size: number, containerStyle?: any) => {
+  const renderProfileImage = (size: number) => {
     if (isImageLoading) {
       return (
-        <View style={[{
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: '#e0e0e0',
-            justifyContent: 'center',
-            alignItems: 'center',
-          },
-          containerStyle
-        ]}>
-          <ActivityIndicator size="small" color="#666" />
+        <View style={[styles.profileImageContainer, { width: size, height: size }]}>
+          <ActivityIndicator size="small" color="#6E6E6E" />
         </View>
       );
     }
 
     if (!profileImageUri || imageLoadError) {
       return (
-        <View style={[{
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: '#e0e0e0',
-            justifyContent: 'center',
-            alignItems: 'center',
-          },
-          containerStyle
-        ]}>
-          <Ionicons 
-            name="person-circle" 
-            size={size * 0.9} 
-            color="#666" 
-          />
+        <View style={[styles.profileImageContainer, { width: size, height: size }]}>
+          <Ionicons name="person" size={size * 0.5} color="#6E6E6E" />
         </View>
       );
     }
 
     return (
-      <View style={[{ width: size, height: size, borderRadius: size / 2 }, containerStyle]}>
-        <Image
-          source={{ uri: profileImageUri }}
-          style={{
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-          }}
-          onError={(error) => {
-            console.log('Image failed to load:', error.nativeEvent?.error);
-            setImageLoadError(true);
-          }}
-          onLoad={() => {
-            console.log('Image loaded successfully');
-            setImageLoadError(false);
-          }}
-          resizeMode="cover"
-        />
-      </View>
+      <Image
+        source={{ uri: profileImageUri }}
+        style={[styles.profileImage, { width: size, height: size }]}
+        onError={() => setImageLoadError(true)}
+        onLoad={() => setImageLoadError(false)}
+      />
     );
   };
 
-  // Render grid item
-  const renderGridItem = (item: GridItem) => (
-    <TouchableOpacity
-      key={item.id}
-      style={homeStyles.gridItem}
-      onPress={() => handleGridItemPress(item.route)}
-      activeOpacity={0.8}
-    >
-      <BlurView intensity={80} tint="light" style={homeStyles.gridItemBlur}>
-        <View style={homeStyles.gridItemContent}>
-          <View style={[homeStyles.gridIconContainer, { backgroundColor: `${item.color}20` }]}>
-            <Ionicons name={item.icon as any} size={26} color={item.color} />
-          </View>
-          <Text style={homeStyles.gridItemTitle}>{item.title}</Text>
-          <Text style={homeStyles.gridItemDescription}>{item.description}</Text>
-        </View>
-      </BlurView>
-    </TouchableOpacity>
-  );
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 18) return 'Good Afternoon';
+    return 'Good Evening';
+  };
 
-  // MAIN INITIALIZATION EFFECT
+  const formatTime = (timeString?: string) => {
+    if (!timeString) return 'Not recorded';
+    try {
+      let date;
+      if (/^\d{2}:\d{2}:\d{2}$/.test(timeString)) {
+        const today = new Date().toISOString().split('T')[0];
+        date = new Date(`${today}T${timeString}`);
+      } else {
+        date = new Date(timeString);
+      }
+      if (isNaN(date.getTime())) return timeString;
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return timeString;
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
-      const hasCredentials = await initializeUser();
+      await initializeUser();
       setIsInitializing(false);
     };
-    
     init();
   }, []);
 
-  // FETCH PROFILE EFFECT
   useEffect(() => {
     if (userCredentials?.userId && !isInitializing) {
       fetchUserProfile();
+      fetchMonthlyAttendance();
     }
-  }, [userCredentials, isInitializing]);
+  }, [userCredentials, isInitializing, selectedDate]);
 
-  if (isInitializing) {
-    return (
-      <View style={[homeStyles.container, homeStyles.loadingContainer]}>
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text style={homeStyles.loadingText}>Initializing...</Text>
-      </View>
+  // Live polling: refresh today's attendance every 30s only when today is selected
+  useEffect(() => {
+    const isToday = selectedDate.toDateString() === new Date().toDateString();
+    if (!userCredentials?.userId || isInitializing || !isToday) {
+      if (liveIntervalRef.current) clearInterval(liveIntervalRef.current);
+      return;
+    }
+    liveIntervalRef.current = setInterval(() => {
+      fetchMonthlyAttendance();
+    }, 30000);
+    return () => {
+      if (liveIntervalRef.current) clearInterval(liveIntervalRef.current);
+    };
+  }, [userCredentials, isInitializing, selectedDate]);
+
+  // Pulsing animation for live dot
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(liveAnim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(liveAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
     );
-  }
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
 
-  if (!userCredentials) {
+  useEffect(() => {
+    if (monthlyAttendance.length > 0) {
+      updateSelectedAttendance(monthlyAttendance, selectedDate);
+    }
+  }, [selectedDate, monthlyAttendance]);
+
+  if (isInitializing || !userCredentials) {
     return (
-      <View style={[homeStyles.container, homeStyles.loadingContainer]}>
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text style={homeStyles.loadingText}>Redirecting to login...</Text>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#F4C84A" />
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
 
   return (
-    <View style={[homeStyles.container, { backgroundColor: '#1a1a2e' }]}>
-      {/* Loading overlay */}
+    <LinearGradient
+      colors={['#F3F2EE', '#F2D98C']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.container}
+    >
       {loadingTab && (
-        <View style={homeStyles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={homeStyles.loadingOverlayTxt}>Loading…</Text>
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#F4C84A" />
         </View>
       )}
 
-      <View style={homeStyles.overlay}>
-        <View style={homeStyles.header}>
-          <TouchableOpacity
-            style={homeStyles.profileIconButton}
-            onPress={() => setShowProfileCard(true)}
-          >
-            {renderProfileImage(35)}
+      <ScrollView
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F4C84A" />
+        }
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={() => setShowProfileCard(true)}>
+              {renderProfileImage(48)}
+            </TouchableOpacity>
+            <View style={styles.greetingContainer}>
+              <Text style={styles.greetingText}>{getGreeting()}</Text>
+              <View style={styles.userNameRow}>
+                <Text style={styles.userName}>{username}</Text>
+                {userCredentials?.userId === 'anazilthottunghal@gmail.com' && (
+                  <Ionicons name="checkmark-circle" size={18} color="#4CAF50" style={styles.verificationIcon} />
+                )}
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.notificationButton} onPress={() => router.push('/notifications')}>
+            <Ionicons name="notifications-outline" size={24} color="#2C2C2C" />
+            <View style={styles.notificationDot} />
           </TouchableOpacity>
         </View>
 
+        {/* Calendar */}
         <ScrollView
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />
-          }
-          contentContainerStyle={homeStyles.scrollContent}
-          showsVerticalScrollIndicator={false}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.calendarContainer}
         >
-          {/* Welcome Section */}
-          <View style={homeStyles.welcomeSection}>
-            <Text style={homeStyles.welcomeTitle}>Welcome back,</Text>
-            <Text style={homeStyles.welcomeName}>{username}</Text>
-          </View>
-
-          {/* Grid Container */}
-          <View style={homeStyles.gridContainer}>
-            <View style={homeStyles.gridRow}>
-              {gridItems.slice(0, 2).map(renderGridItem)}
-            </View>
-            <View style={homeStyles.gridRow}>
-              {gridItems.slice(2, 4).map(renderGridItem)}
-            </View>
-            <View style={homeStyles.gridRow}>
-              {gridItems.slice(4, 6).map(renderGridItem)}
-            </View>
-          </View>
-
-          {/* Footer */}
-          <View style={homeStyles.footer}>
-            <Text style={homeStyles.footerText}>Powered by IMC Business Solutions</Text>
-            <Text style={homeStyles.footerVersion}>v3.1</Text>
-          </View>
+          {dates.map((date, index) => {
+            const isSelected = date.toDateString() === selectedDate.toDateString();
+            const isToday = date.toDateString() === new Date().toDateString();
+            return (
+              <TouchableOpacity
+                key={index}
+                style={styles.dateCardWrapper}
+                onPress={() => setSelectedDate(date)}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={isSelected ? ['#F4C84A', '#F4C84A'] : ['#FFFFFF', '#F6F1E8']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[
+                    styles.dateCard,
+                    isSelected && styles.dateCardSelected,
+                    !isSelected && styles.dateCardUnselected
+                  ]}
+                >
+                  <Text style={[styles.dateDay, isSelected && styles.dateDaySelected]}>
+                    {date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}
+                  </Text>
+                  <Text style={[styles.dateNumber, isSelected && styles.dateNumberSelected]}>
+                    {date.getDate()}
+                  </Text>
+                  {isToday && <View style={styles.todayDot} />}
+                </LinearGradient>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
-        {/* Profile Modal */}
-        <Modal
-          visible={showProfileCard}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowProfileCard(false)}
+        {/* Selected Date Attendance Card */}
+        <TouchableOpacity 
+          style={styles.attendanceCard}
+          onPress={() => handleGridItemPress('punch')}
+          activeOpacity={0.9}
         >
-          <TouchableOpacity
-            style={homeStyles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowProfileCard(false)}
+          <LinearGradient
+            colors={['rgba(255, 255, 255, 0.95)', 'rgba(246, 241, 232, 0.95)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.attendanceGradient}
           >
-            <BlurView intensity={90} style={homeStyles.profileCard}>
-              <TouchableOpacity activeOpacity={1} style={homeStyles.profileContent}>
-                <View style={homeStyles.profileHeader}>
-                  <View style={homeStyles.profileIconContainer}>
-                    {renderProfileImage(80)}
-                  </View>
-                  <Text style={homeStyles.profileName}>Hello, {username}</Text>
+            <View style={styles.attendanceHeader}>
+              <Text style={styles.attendanceTitle}>
+                {selectedDate.toDateString() === new Date().toDateString() 
+                  ? "Today's Attendance" 
+                  : selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </Text>
+              <View style={styles.liveIndicator}>
+                <Animated.View style={[styles.pulsingDot, { opacity: selectedAttendance?.punch_in && !selectedAttendance?.punch_out ? liveAnim : 0.3 }]} />
+                <Text style={styles.liveText}>
+                  {selectedAttendance?.punch_in && !selectedAttendance?.punch_out ? 'Live' : 'Not Active'}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.timelineContainer}>
+              <View style={styles.timelineItem}>
+                <View style={[styles.timelineIcon, selectedAttendance?.punch_in && styles.timelineIconActive]}>
+                  <Ionicons 
+                    name="log-in" 
+                    size={20} 
+                    color={selectedAttendance?.punch_in ? "#4CAF50" : "#ccc"} 
+                  />
                 </View>
-                <TouchableOpacity style={homeStyles.logoutButton} onPress={handleLogout}>
-                  <Ionicons name="log-out-outline" size={20} color="#fff" style={homeStyles.logoutIcon} />
-                  <Text style={homeStyles.logoutText}>Logout</Text>
-                </TouchableOpacity>
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineLabel}>Punch In</Text>
+                  <Text style={[styles.timelineTime, selectedAttendance?.punch_in && styles.timelineTimeActive]}>
+                    {formatTime(selectedAttendance?.punch_in)}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.timelineConnector}>
+                <View style={[
+                  styles.timelineProgress,
+                  selectedAttendance?.punch_in && !selectedAttendance?.punch_out && styles.timelineProgressActive
+                ]} />
+              </View>
+              
+              <View style={styles.timelineItem}>
+                <View style={[styles.timelineIcon, selectedAttendance?.punch_out && styles.timelineIconActive]}>
+                  <Ionicons 
+                    name="log-out" 
+                    size={20} 
+                    color={selectedAttendance?.punch_out ? "#F44336" : "#ccc"} 
+                  />
+                </View>
+                <View style={styles.timelineContent}>
+                  <Text style={styles.timelineLabel}>Punch Out</Text>
+                  <Text style={[styles.timelineTime, selectedAttendance?.punch_out && styles.timelineTimeActive]}>
+                    {formatTime(selectedAttendance?.punch_out)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+            
+            {selectedAttendance?.punch_in && !selectedAttendance?.punch_out && 
+             selectedDate.toDateString() === new Date().toDateString() && (
+              <View style={styles.currentlyWorkingContainer}>
+                <View style={styles.breathingDot} />
+                <Text style={styles.currentlyWorkingText}>Currently Working</Text>
+              </View>
+            )}
+            
+            {selectedAttendance?.working_hours && (
+              <View style={styles.workingHoursContainer}>
+                <Ionicons name="time-outline" size={16} color="#6E6E6E" />
+                <Text style={styles.workingHoursText}>{selectedAttendance.working_hours}</Text>
+              </View>
+            )}
+            
+            {selectedAttendance?.status && (
+              <View style={styles.statusBadgeContainer}>
+                <Text style={styles.statusBadge}>{selectedAttendance.status.toUpperCase()}</Text>
+              </View>
+            )}
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Grid Cards */}
+        <View style={styles.actionsSection}>
+          <Text style={styles.sectionHeading}>Quick Actions</Text>
+          <View style={styles.gridContainer}>
+            {gridItems.map((item) => {
+              const scaleAnim = new Animated.Value(1);
+              
+              const handlePressIn = () => {
+                Animated.timing(scaleAnim, {
+                  toValue: 0.97,
+                  duration: 150,
+                  useNativeDriver: true,
+                }).start();
+              };
+              
+              const handlePressOut = () => {
+                Animated.timing(scaleAnim, {
+                  toValue: 1,
+                  duration: 150,
+                  useNativeDriver: true,
+                }).start();
+              };
+              
+              return (
+                <Pressable
+                  key={item.id}
+                  style={styles.gridCardWrapper}
+                  onPress={() => handleGridItemPress(item.route)}
+                  onPressIn={handlePressIn}
+                  onPressOut={handlePressOut}
+                >
+                  <Animated.View style={{ flex: 1, transform: [{ scale: scaleAnim }] }}>
+                    <LinearGradient
+                      colors={['#FFFFFF', '#F6F1E8']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.gridCard}
+                    >
+                      <View style={styles.cardIconContainer}>
+                        <Ionicons name={item.icon as any} size={32} color="#87847b" />
+                      </View>
+                      <Text style={styles.cardTitle}>{item.title}</Text>
+                      <Text style={styles.cardValue}>{item.value}</Text>
+                    </LinearGradient>
+                  </Animated.View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Version 4.0.0</Text>
+        </View>
+      </ScrollView>
+
+      {/* Profile Modal */}
+      <Modal
+        visible={showProfileCard}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowProfileCard(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowProfileCard(false)}
+        >
+          <View style={styles.profileCard}>
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.profileHeader}>
+                {renderProfileImage(80)}
+                <Text style={styles.profileName}>{username}</Text>
+                <Text style={styles.profileEmail}>{userCredentials?.userId}</Text>
+              </View>
+              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                <Ionicons name="log-out-outline" size={20} color="#2C2C2C" />
+                <Text style={styles.logoutText}>Logout</Text>
               </TouchableOpacity>
-            </BlurView>
-          </TouchableOpacity>
-        </Modal>
-      </View>
-    </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </LinearGradient>
   );
 }
 
-const homeStyles = StyleSheet.create({
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F3F2EE',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#6E6E6E',
+    fontWeight: '400',
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     zIndex: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingOverlayTxt: { color: '#fff', marginTop: 8 },
-  container: { flex: 1, width: '100%', height: '100%' },
-  overlay: { flex: 1, backgroundColor: 'transparent' },
-  loadingContainer: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' },
-  loadingText: { color: '#ffffff', marginTop: 10, fontSize: 16 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 7,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.01)',
-  },
-  profileIconButton: { padding: 5 },
   scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 12,
-    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingTop: 60,
     paddingBottom: 30,
   },
-
-  // Welcome Section Styles
-  welcomeSection: {
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingVertical: 10,
-  },
-  welcomeTitle: {
-    fontSize: 20,
-    color: '#ffffff',
-    fontWeight: '300',
-    textAlign: 'center',
-  },
-  welcomeName: {
-    fontSize: 22,
-    color: '#00ddff',
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginVertical: 4,
-  },
-
-  // Grid Styles
-  gridContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gridRow: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 24,
   },
-  gridItem: {
-    width: '48%',
-    height: 150,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(13, 193, 233, 0.93)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  profileImageContainer: {
+    borderRadius: 100,
+    backgroundColor: '#F6F1E8',
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  gridItemBlur: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    flex: 1,
+  profileImage: {
+    borderRadius: 100,
   },
-  gridItemContent: {
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    alignItems: 'center',
+  greetingContainer: {
     justifyContent: 'center',
     flex: 1,
   },
-  gridIconContainer: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 6,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  gridItemTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 3,
-    textAlign: 'center',
-  },
-  gridItemDescription: {
-    fontSize: 10,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 12,
-  },
-
-  // Footer Styles
-  footer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 20,
-    paddingTop: 30,
-    marginTop: 10,
-  },
-  footerText: {
+  greetingText: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.6)',
-    textAlign: 'center',
+    color: '#6E6E6E',
     fontWeight: '400',
+    marginBottom: 4,
+    opacity: 0.7,
   },
-  footerVersion: {
-    fontSize: 17,
-    color: 'rgba(255, 255, 255, 0.4)',
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  userName: {
+    fontSize: 18,
+    color: '#1C1C1C',
+    fontWeight: '700',
+  },
+  verificationIcon: {
+    marginLeft: 2,
+  },
+  notificationButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F6F1E8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F4C84A',
+  },
+  calendarContainer: {
+    paddingVertical: 16,
+    gap: 12,
+  },
+  dateCardWrapper: {
+    width: 60,
+    height: 80,
+  },
+  dateCard: {
+    flex: 1,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  dateCardSelected: {
+    transform: [{ scale: 1.03 }],
+  },
+  dateCardUnselected: {
+    opacity: 0.85,
+  },
+  dateDay: {
+    fontSize: 11,
+    color: '#6E6E6E',
+    fontWeight: '400',
+    marginBottom: 4,
+  },
+  dateDaySelected: {
+    color: '#1C1C1C',
+  },
+  dateNumber: {
+    fontSize: 18,
+    color: '#1C1C1C',
+    fontWeight: '500',
+  },
+  dateNumberSelected: {
+    color: '#1C1C1C',
+  },
+  todayDot: {
+    position: 'absolute',
+    bottom: 8,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#F4C84A',
+  },
+  actionsSection: {
+    marginTop: 1,
+  },
+  sectionHeading: {
+    fontSize: 18,
+    color: '#1C1C1C',
+    fontWeight: '500',
+    marginBottom: 16,
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+  },
+  gridCardWrapper: {
+    width: '47%',
+    aspectRatio: 1,
+  },
+  gridCard: {
+    flex: 1,
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  cardIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(244, 200, 74, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontSize: 16,
+    color: '#1C1C1C',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  cardValue: {
+    fontSize: 12,
+    color: '#6E6E6E',
+    fontWeight: '400',
     textAlign: 'center',
-    marginTop: 4,
-    fontWeight: '300',
   },
-
-  // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   profileCard: {
-    borderRadius: 20,
-    width: '80%',
-    maxWidth: 300,
-    overflow: 'hidden',
+    width: '85%',
+    maxWidth: 320,
+    borderRadius: 24,
+    backgroundColor: '#F6F1E8',
+    padding: 32,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 30,
     elevation: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 8 },
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(10, 23, 95, 0.36)',
   },
-  profileContent: {
-    padding: 30,
+  profileHeader: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    marginBottom: 24,
   },
-  profileHeader: { alignItems: 'center', marginBottom: 30 },
-  profileIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    overflow: 'hidden',
+  profileName: {
+    fontSize: 22,
+    color: '#2C2C2C',
+    fontWeight: '600',
+    marginTop: 16,
   },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  profileEmail: {
+    fontSize: 14,
+    color: '#6E6E6E',
+    fontWeight: '400',
+    marginTop: 4,
   },
-  profileName: { fontSize: 18, fontWeight: '600', color: '#333', textAlign: 'center' },
   logoutButton: {
-    backgroundColor: '#ff4444',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 120,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  logoutIcon: { marginRight: 8 },
-  logoutText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  logoutText: {
+    fontSize: 16,
+    color: '#2C2C2C',
+    fontWeight: '500',
+  },
+  footer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    marginTop: 16,
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#6E6E6E',
+    fontWeight: '400',
+  },
+  attendanceCard: {
+    marginTop: 16,
+    marginBottom: 24,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  attendanceGradient: {
+    padding: 20,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  attendanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  attendanceTitle: {
+    fontSize: 18,
+    color: '#1C1C1C',
+    fontWeight: '600',
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  pulsingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  liveText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  timelineContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timelineItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  timelineIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(204, 204, 204, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(204, 204, 204, 0.3)',
+  },
+  timelineIconActive: {
+    backgroundColor: 'rgba(244, 200, 74, 0.2)',
+    borderColor: '#F4C84A',
+  },
+  timelineContent: {
+    alignItems: 'center',
+  },
+  timelineLabel: {
+    fontSize: 12,
+    color: '#6E6E6E',
+    fontWeight: '400',
+    marginBottom: 4,
+  },
+  timelineTime: {
+    fontSize: 16,
+    color: '#ccc',
+    fontWeight: '600',
+  },
+  timelineTimeActive: {
+    color: '#1C1C1C',
+  },
+  timelineConnector: {
+    width: 60,
+    height: 2,
+    backgroundColor: 'rgba(204, 204, 204, 0.3)',
+    marginHorizontal: 8,
+    borderRadius: 1,
+    overflow: 'hidden',
+  },
+  timelineProgress: {
+    height: '100%',
+    width: 0,
+    backgroundColor: '#F4C84A',
+  },
+  timelineProgressActive: {
+    width: '100%',
+  },
+  workingHoursContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(110, 110, 110, 0.1)',
+    gap: 6,
+  },
+  workingHoursText: {
+    fontSize: 14,
+    color: '#6E6E6E',
+    fontWeight: '500',
+  },
+  currentlyWorkingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  breathingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  currentlyWorkingText: {
+    fontSize: 14,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  statusBadgeContainer: {
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  statusBadge: {
+    fontSize: 11,
+    color: '#6E6E6E',
+    fontWeight: '600',
+    backgroundColor: 'rgba(110, 110, 110, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
 });
+
+

@@ -87,13 +87,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.adila2005.imcmobileapp'
+    namespace 'com.myimc2006.app'
     defaultConfig {
-        applicationId 'com.adila2005.imcmobileapp'
+        applicationId 'com.myimc2006.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "3.2"
+        versionCode 11
+        versionName "4.1.4"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
-import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
 import React, { useState } from 'react';
 import {
     ActivityIndicator,
@@ -10,6 +10,8 @@ import {
     Text,
     TouchableOpacity,
     View,
+    Animated,
+    Pressable,
 } from 'react-native';
 
 interface AttendanceOption {
@@ -22,10 +24,9 @@ interface AttendanceOption {
 }
 
 export default function Attendance() {
-  const router = useRouter();
+  const navigation = useNavigation();
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
 
-  // Attendance options configuration
   const attendanceOptions: AttendanceOption[] = [
     {
       id: '1',
@@ -45,210 +46,211 @@ export default function Attendance() {
     }
   ];
 
-  /* ---------- Navigation handlers ---------- */
   const handleOptionPress = async (route: string) => {
     if (loadingTab) return;
     setLoadingTab(route);
-    await new Promise((res) => setTimeout(res, 300)); // mimic loading
-    router.push(`/${route}`);
+    await new Promise((res) => setTimeout(res, 300));
+    
+    // Map routes to navigation screen names
+    const routeMap: { [key: string]: string } = {
+      'punch': 'Punch',
+      'request': 'Request',
+    };
+    
+    navigation.navigate(routeMap[route] || route);
     setLoadingTab(null);
   };
 
   const handleBackPress = () => {
-    router.back();
+    navigation.goBack();
   };
 
-  // Render attendance option
-  const renderAttendanceOption = (option: AttendanceOption) => (
-    <TouchableOpacity
-      key={option.id}
-      style={attendanceStyles.optionItem}
-      onPress={() => handleOptionPress(option.route)}
-      activeOpacity={0.8}
-    >
-      <BlurView intensity={80} tint="light" style={attendanceStyles.optionItemBlur}>
-        <View style={attendanceStyles.optionItemContent}>
-          <View style={[attendanceStyles.optionIconContainer, { backgroundColor: `${option.color}20` }]}>
-            <Ionicons name={option.icon as any} size={36} color={option.color} />
-          </View>
-          <Text style={attendanceStyles.optionItemTitle}>{option.title}</Text>
-          <Text style={attendanceStyles.optionItemDescription}>{option.description}</Text>
-        </View>
-      </BlurView>
-    </TouchableOpacity>
-  );
+  const renderAttendanceOption = (option: AttendanceOption) => {
+    const scaleAnim = new Animated.Value(1);
+    
+    const handlePressIn = () => {
+      Animated.timing(scaleAnim, {
+        toValue: 0.97,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
+    };
+    
+    const handlePressOut = () => {
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    return (
+      <Pressable
+        key={option.id}
+        style={styles.optionCardWrapper}
+        onPress={() => handleOptionPress(option.route)}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Animated.View style={{ flex: 1, transform: [{ scale: scaleAnim }] }}>
+          <LinearGradient
+            colors={['#FFFFFF', '#F6F1E8']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.optionCard}
+          >
+            <View style={[styles.optionIconContainer, { backgroundColor: `${option.color}20` }]}>
+              <Ionicons name={option.icon as any} size={48} color={option.color} />
+            </View>
+            <Text style={styles.optionTitle}>{option.title}</Text>
+            <Text style={styles.optionDescription}>{option.description}</Text>
+          </LinearGradient>
+        </Animated.View>
+      </Pressable>
+    );
+  };
 
   return (
-    <View style={[attendanceStyles.container, { backgroundColor: '#1a1a2e' }]}>
-      {/* ---------- loading overlay ---------- */}
+    <LinearGradient
+      colors={['#F3F2EE', '#F2D98C']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.container}
+    >
       {loadingTab && (
-        <View style={attendanceStyles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={attendanceStyles.loadingOverlayTxt}>Loading…</Text>
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#F4C84A" />
         </View>
       )}
 
-      <View style={attendanceStyles.overlay}>
-        {/* Header */}
-        <View style={attendanceStyles.header}>
-          <TouchableOpacity
-            style={attendanceStyles.backButton}
-            onPress={handleBackPress}
-          >
-            <Ionicons name="arrow-back" size={24} color="#ffffff" />
-          </TouchableOpacity>
-          <Text style={attendanceStyles.headerTitle}>Attendance</Text>
-          <View style={attendanceStyles.placeholder} />
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={handleBackPress}
+        >
+          <Ionicons name="arrow-back" size={24} color="#2C2C2C" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Attendance</Text>
+        <View style={styles.placeholder} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.titleSection}>
+          <Text style={styles.pageTitle}>Choose an option</Text>
+          <Text style={styles.pageSubtitle}>
+            Select what you'd like to do with your attendance
+          </Text>
         </View>
 
-        <ScrollView
-          contentContainerStyle={attendanceStyles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Title Section */}
-          <View style={attendanceStyles.titleSection}>
-            <Text style={attendanceStyles.pageTitle}>Choose an option</Text>
-            <Text style={attendanceStyles.pageSubtitle}>
-              Select what you'd like to do with your attendance
-            </Text>
-          </View>
-
-          {/* Options Container */}
-          <View style={attendanceStyles.optionsContainer}>
-            {attendanceOptions.map(renderAttendanceOption)}
-          </View>
-        </ScrollView>
-      </View>
-    </View>
+        <View style={styles.optionsContainer}>
+          {attendanceOptions.map(renderAttendanceOption)}
+        </View>
+      </ScrollView>
+    </LinearGradient>
   );
 }
 
-const attendanceStyles = StyleSheet.create({
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     zIndex: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingOverlayTxt: { 
-    color: '#fff', 
-    marginTop: 8 
-  },
-  container: { 
-    flex: 1, 
-    width: '100%', 
-    height: '100%' 
-  },
-  overlay: { 
-    flex: 1, 
-    backgroundColor: 'transparent' 
-  },
-  
-  // Header Styles
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 15,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.01)',
+    paddingTop: 60,
   },
   backButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: '700',
+    color: '#1C1C1C',
   },
   placeholder: {
-    width: 40, // Same width as back button for centering
+    width: 40,
   },
-  
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 30,
+    paddingTop: 20,
     paddingBottom: 30,
   },
-
-  // Title Section Styles
   titleSection: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
     paddingVertical: 20,
   },
   pageTitle: {
-    fontSize: 26,
-    color: '#ffffff',
-    fontWeight: 'bold',
+    fontSize: 28,
+    color: '#1C1C1C',
+    fontWeight: '700',
     textAlign: 'center',
     marginBottom: 10,
   },
   pageSubtitle: {
     fontSize: 16,
-    color: '#cccccc',
+    color: '#6E6E6E',
     textAlign: 'center',
     lineHeight: 22,
   },
-
-  // Options Styles
- optionsContainer: {
-    alignItems: 'center', // Center the items
-    justifyContent: 'center',
+  optionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 16,
+    justifyContent: 'space-between',
     paddingHorizontal: 10,
   },
-  optionItem: {
-    width: '85%', // Consistent width for all items
-    maxWidth: 320, // Maximum width to prevent items from being too wide
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+  optionCardWrapper: {
+    width: '47%',
+    aspectRatio: 0.9,
   },
-  optionItemBlur: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  optionItemContent: {
-    paddingVertical: 35,
-    paddingHorizontal: 25,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+  optionCard: {
+    flex: 1,
+    borderRadius: 20,
+    padding: 24,
     alignItems: 'center',
-    minHeight: 180,
-    maxHeight: 180,
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 6,
   },
   optionIconContainer: {
-    width: 75,
-    height: 75,
-    borderRadius: 37.5,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginBottom: 12,
   },
-  optionItemTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-    marginBottom: 8,
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1C1C1C',
+    marginBottom: 4,
     textAlign: 'center',
   },
-  optionItemDescription: {
-    fontSize: 14,
-    color: '#6b7280',
+  optionDescription: {
+    fontSize: 11,
+    color: '#6E6E6E',
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 14,
   },
 });

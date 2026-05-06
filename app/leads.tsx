@@ -1,219 +1,154 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
 import {
     Animated,
-    Dimensions,
-    Easing,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
 export default function Leads() {
-  const router = useRouter();
+  const navigation = useNavigation();
   
-  // Animation values
-  const pulseValue = new Animated.Value(1);
-  const bounceValue = new Animated.Value(0);
-  const peopleValue = new Animated.Value(0);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const dotAnim = useRef(new Animated.Value(1)).current;
 
-  // Bounce animation
-  React.useEffect(() => {
-    const bounceAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bounceValue, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(bounceValue, {
-          toValue: 0,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
+  useEffect(() => {
+    // Fade and slide animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        tension: 50,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
-    // Pulse animation
-    const pulseAnimation = Animated.loop(
+    // Icon pulse animation
+    Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseValue, {
+        Animated.timing(pulseAnim, {
           toValue: 1.1,
           duration: 1500,
-          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-        Animated.timing(pulseValue, {
+        Animated.timing(pulseAnim, {
           toValue: 1,
           duration: 1500,
-          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
       ])
-    );
+    ).start();
 
-    // People animation
-    const peopleAnimation = Animated.loop(
-      Animated.timing(peopleValue, {
-        toValue: 1,
-        duration: 3000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-
-    bounceAnimation.start();
-    pulseAnimation.start();
-    peopleAnimation.start();
-
-    return () => {
-      bounceAnimation.stop();
-      pulseAnimation.stop();
-      peopleAnimation.stop();
-    };
+    // Dot breathing animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, {
+          toValue: 1.5,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(dotAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
   }, []);
-
-  // Interpolate animations
-  const bounce = bounceValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -20],
-  });
-
-  const pulse = pulseValue;
-  
-  const peopleScale = peopleValue.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [1, 1.2, 1],
-  });
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={['#FDFCF8', '#FFF8E7', '#FFE5B4']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Leads Management</Text>
-        <View style={styles.headerPlaceholder} />
+        <Text style={styles.headerTitle}>Leads</Text>
+        <View style={styles.placeholder} />
       </View>
 
-      {/* Main Content */}
+      {/* Content */}
       <View style={styles.content}>
-        {/* Animated People Icons */}
-        <View style={styles.peopleContainer}>
-          <Animated.View 
-            style={[
-              styles.person,
-              { 
-                transform: [
-                  { translateY: bounce },
-                  { scale: peopleScale }
-                ] 
-              }
-            ]}
-          >
-            <Ionicons name="person" size={40} color="#9C27B0" />
-          </Animated.View>
-          
-          <Animated.View 
-            style={[
-              styles.person,
-              styles.personRight,
-              { 
-                transform: [
-                  { 
-                    translateY: bounceValue.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -15],
-                    }) 
-                  },
-                  { scale: pulse }
-                ] 
-              }
-            ]}
-          >
-            <Ionicons name="person" size={35} color="#E91E63" />
-          </Animated.View>
-          
-          <Animated.View 
-            style={[
-              styles.person,
-              styles.personLeft,
-              { 
-                transform: [
-                  { 
-                    translateY: bounceValue.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -10],
-                    }) 
-                  },
-                  { scale: pulse }
-                ] 
-              }
-            ]}
-          >
-            <Ionicons name="person" size={30} color="#673AB7" />
-          </Animated.View>
-        </View>
-
-        {/* Work in Progress Text */}
         <Animated.View 
           style={[
-            styles.textContainer,
-            { transform: [{ scale: pulse }] }
+            styles.iconContainer,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim },
+                { scale: pulseAnim },
+              ],
+            },
           ]}
         >
-          <Text style={styles.title}>Leads Hub Coming Soon</Text>
-          <Text style={styles.subtitle}>
-            Building connections that matter!
-          </Text>
+          <View style={styles.iconCircle}>
+            <Ionicons name="people" size={80} color="#3B82F6" />
+          </View>
+        </Animated.View>
+
+        <Animated.View
+          style={[
+            styles.textContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          <View style={styles.statusBadge}>
+            <Animated.View 
+              style={[
+                styles.breathingDot,
+                { transform: [{ scale: dotAnim }] },
+              ]} 
+            />
+            <Text style={styles.statusText}>COMING SOON</Text>
+          </View>
+          <Text style={styles.title}>Leads Management</Text>
           <Text style={styles.description}>
-            Our comprehensive leads management system is under development. 
-            Soon you'll be able to track potential customers, 
-            manage follow-ups, and convert leads into successful partnerships.
+            Manage and track your leads effectively. Our comprehensive leads management system is under development.
           </Text>
         </Animated.View>
 
-        {/* Progress Animation */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBackground}>
-            <Animated.View 
-              style={[
-                styles.progressBar,
-                { 
-                  transform: [
-                    { 
-                      translateX: peopleValue.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-100, width - 100],
-                      }) 
-                    }
-                  ] 
-                }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>Connecting the dots...</Text>
-        </View>
-
-        {/* Back to Home Button */}
-        <TouchableOpacity 
-          style={[styles.homeButton, { backgroundColor: '#9C27B0' }]}
-          onPress={() => router.push('/')}
+        <Animated.View
+          style={[
+            styles.buttonContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
         >
-          <Ionicons name="home" size={20} color="#fff" style={styles.homeIcon} />
-          <Text style={styles.homeButtonText}>Back to Home</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.backHomeButton}
+            onPress={() => navigation.navigate('HomeNew')}
+          >
+            <Ionicons name="home" size={20} color="#1C1B17" />
+            <Text style={styles.backHomeText}>Back to Home</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </View>
   );
@@ -222,116 +157,115 @@ export default function Leads() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FDFCF8',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: 0.5,
   },
-  headerPlaceholder: {
+  placeholder: {
     width: 40,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 30,
+    paddingHorizontal: 40,
   },
-  peopleContainer: {
-    position: 'relative',
-    marginBottom: 50,
-    alignItems: 'center',
+  iconContainer: {
+    marginBottom: 40,
+  },
+  iconCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
     justifyContent: 'center',
-    height: 100,
-  },
-  person: {
-    position: 'absolute',
-  },
-  personRight: {
-    right: -40,
-  },
-  personLeft: {
-    left: -40,
+    alignItems: 'center',
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
+    elevation: 12,
   },
   textContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 50,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 196, 81, 0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    marginBottom: 24,
+    gap: 10,
+  },
+  breathingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5C451',
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#D4A574',
+    fontWeight: '800',
+    letterSpacing: 2,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1C1B17',
     textAlign: 'center',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#9C27B0',
-    textAlign: 'center',
-    marginBottom: 15,
-    fontWeight: '500',
+    marginBottom: 16,
+    letterSpacing: -0.5,
   },
   description: {
-    fontSize: 14,
-    color: '#ccc',
+    fontSize: 16,
+    color: '#7E7767',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 24,
+    maxWidth: 320,
+    fontWeight: '500',
   },
-  progressContainer: {
+  buttonContainer: {
     width: '100%',
-    marginBottom: 40,
-    alignItems: 'center',
   },
-  progressBackground: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressBar: {
-    width: 100,
-    height: 6,
-    backgroundColor: '#9C27B0',
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  homeButton: {
+  backHomeButton: {
     flexDirection: 'row',
-    backgroundColor: '#9C27B0',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 160,
+    backgroundColor: '#F5C451',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    gap: 10,
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  homeIcon: {
-    marginRight: 8,
-  },
-  homeButtonText: {
-    color: '#fff',
+  backHomeText: {
+    color: '#1C1B17',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
 });

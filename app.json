@@ -1,22 +1,22 @@
 {
   "expo": {
-    "name": "My IMC",
-    "owner": "adila2005.2",
+    "name": "MY IMC",
     "slug": "MY-IMC",
-    "version": "3.2",
+    "version": "4.1.4",
     "orientation": "portrait",
-    "icon": "./assets/images/newwhite.png",
+    "icon": "./assets/images/app_logo_IF.png",
     "scheme": "imcmobileapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
-      "image": "./assets/images/IMCNEW.png",
+      "image": "./assets/images/loo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ecf6f9"
+      "backgroundColor": "#ff6c00"
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "2",
+      "buildNumber": "10",
+      "bundleIdentifier": "com.myimc2006.app",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSExceptionDomains": {
@@ -26,34 +26,22 @@
               "NSIncludesSubdomains": true
             }
           }
-        }
-      },
-      "splash": {
-        "image": "./assets/images/IMCNEW.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#ecf6f9"
+        },
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "This app requires access to your photo library to allow users to upload bills, receipts, and screenshots as proof for work-related activities within their company account.",
+        "NSLocationWhenInUseUsageDescription": "This app requires access to your location to record employee Punch In and Punch Out attendance based on their current work location as part of the company's attendance tracking system.",
+        "NSCameraUsageDescription": "This app requires access to your camera to capture photos of bills, receipts, and work-related documents for upload within the app."
       }
     },
     "android": {
-      "versionCode": 2,
-      "icon": "./assets/images/LOGOIMCNEW.png",
+      "versionCode": 11,
+      "icon": "./assets/images/app_logo_IF.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/LOGOIMCNEW.png",
-        "backgroundColor": "#ff6a1a",
-        "monochromeImage": "./assets/images/LOGOIMCNEW.png"
-      },
-      "splash": {
-        "image": "./assets/images/IMCNEW.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#ecf6f9",
-        "mdpi": "./assets/images/IMCNEW.png",
-        "hdpi": "./assets/images/IMCNEW.png",
-        "xhdpi": "./assets/images/IMCNEW.png",
-        "xxhdpi": "./assets/images/IMCNEW.png",
-        "xxxhdpi": "./assets/images/IMCNEW.png"
+        "foregroundImage": "./assets/images/app_logo_IF.png",
+        "backgroundColor": "#ff6c00"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.adila2005.imcmobileapp",
+      "package": "com.myimc2006.app",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE"
@@ -63,10 +51,9 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/app_logo_IF.png"
     },
     "plugins": [
-      "expo-router",
       "expo-secure-store",
       [
         "expo-build-properties",
@@ -76,18 +63,19 @@
             "requestLegacyExternalStorage": true
           }
         }
+      ],
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/app_logo_IF.png",
+          "color": "#F5C451"
+        }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "cli": {
-      "appVersionSource": "local"
-    },
     "extra": {
-      "router": {},
       "eas": {
-        "projectId": "2cd831bd-512c-410b-9eaf-36367eaec867"
+        "projectId": "876c6f71-1467-443f-bc8f-227de54de1e2"
       }
     }
   }

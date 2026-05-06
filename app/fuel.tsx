@@ -1,197 +1,154 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
 import {
     Animated,
-    Dimensions,
-    Easing,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
 export default function Fuel() {
-  const router = useRouter();
+  const navigation = useNavigation();
   
-  // Animation values
-  const flameValue = new Animated.Value(0);
-  const pulseValue = new Animated.Value(1);
-  const waveValue = new Animated.Value(0);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const dotAnim = useRef(new Animated.Value(1)).current;
 
-  // Flame animation
-  React.useEffect(() => {
-    const flameAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(flameValue, {
-          toValue: 1,
-          duration: 500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(flameValue, {
-          toValue: 0,
-          duration: 500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    // Pulse animation
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseValue, {
-          toValue: 1.1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseValue, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    // Wave animation
-    const waveAnimation = Animated.loop(
-      Animated.timing(waveValue, {
+  useEffect(() => {
+    // Fade and slide animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 2000,
-        easing: Easing.linear,
+        duration: 800,
         useNativeDriver: true,
-      })
-    );
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        tension: 50,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
-    flameAnimation.start();
-    pulseAnimation.start();
-    waveAnimation.start();
+    // Icon pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
 
-    return () => {
-      flameAnimation.stop();
-      pulseAnimation.stop();
-      waveAnimation.stop();
-    };
+    // Dot breathing animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, {
+          toValue: 1.5,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(dotAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
   }, []);
-
-  // Interpolate animations
-  const flameScale = flameValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.2],
-  });
-
-  const flameOpacity = flameValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.7, 1],
-  });
-
-  const pulse = pulseValue;
-  
-  const wave = waveValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={['#FDFCF8', '#FFF8E7', '#FFE5B4']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Fuel Management</Text>
-        <View style={styles.headerPlaceholder} />
+        <Text style={styles.headerTitle}>Fuel</Text>
+        <View style={styles.placeholder} />
       </View>
 
-      {/* Main Content */}
+      {/* Content */}
       <View style={styles.content}>
-        {/* Animated Flame Icon */}
         <Animated.View 
           style={[
             styles.iconContainer,
-            { 
+            {
+              opacity: fadeAnim,
               transform: [
-                { scale: flameScale },
-                { scale: pulse }
+                { translateY: slideAnim },
+                { scale: pulseAnim },
               ],
-              opacity: flameOpacity
-            }
+            },
           ]}
         >
-          <Ionicons name="flame" size={80} color="#FF5722" />
+          <View style={styles.iconCircle}>
+            <Ionicons name="car" size={80} color="#EF4444" />
+          </View>
         </Animated.View>
 
-        {/* Wave Animation */}
-        <View style={styles.waveContainer}>
-          <Animated.View 
-            style={[
-              styles.wave,
-              { 
-                transform: [{ rotate: wave }],
-              }
-            ]}
-          >
-            <Ionicons name="water" size={50} color="#2196F3" />
-          </Animated.View>
-        </View>
-
-        {/* Work in Progress Text */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.textContainer,
-            { transform: [{ scale: pulse }] }
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
           ]}
         >
-          <Text style={styles.title}>Fuel Station Coming Soon</Text>
-          <Text style={styles.subtitle}>
-            We're fueling up something great for you!
-          </Text>
+          <View style={styles.statusBadge}>
+            <Animated.View 
+              style={[
+                styles.breathingDot,
+                { transform: [{ scale: dotAnim }] },
+              ]} 
+            />
+            <Text style={styles.statusText}>COMING SOON</Text>
+          </View>
+          <Text style={styles.title}>Fuel Management</Text>
           <Text style={styles.description}>
-            Our fuel management system is currently in development. 
-            Soon you'll be able to track fuel consumption, 
-            manage expenses, and optimize usage efficiently.
+            Track your fuel expenses efficiently. Our fuel management system is under development.
           </Text>
         </Animated.View>
 
-        {/* Progress Animation */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBackground}>
-            <Animated.View 
-              style={[
-                styles.progressBar,
-                { 
-                  transform: [
-                    { 
-                      translateX: waveValue.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-100, width - 100],
-                      }) 
-                    }
-                  ] 
-                }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>Refueling our development tanks...</Text>
-        </View>
-
-        {/* Back to Home Button */}
-        <TouchableOpacity 
-          style={[styles.homeButton, { backgroundColor: '#FF5722' }]}
-          onPress={() => router.push('/')}
+        <Animated.View
+          style={[
+            styles.buttonContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
         >
-          <Ionicons name="home" size={20} color="#fff" style={styles.homeIcon} />
-          <Text style={styles.homeButtonText}>Back to Home</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.backHomeButton}
+            onPress={() => navigation.navigate('HomeNew')}
+          >
+            <Ionicons name="home" size={20} color="#1C1B17" />
+            <Text style={styles.backHomeText}>Back to Home</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </View>
   );
@@ -200,113 +157,115 @@ export default function Fuel() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FDFCF8',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: 0.5,
   },
-  headerPlaceholder: {
+  placeholder: {
     width: 40,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 30,
+    paddingHorizontal: 40,
   },
   iconContainer: {
-    marginBottom: 30,
-    alignItems: 'center',
-  },
-  waveContainer: {
-    position: 'relative',
     marginBottom: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  wave: {
-    position: 'absolute',
+  iconCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
+    elevation: 12,
   },
   textContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 50,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 196, 81, 0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    marginBottom: 24,
+    gap: 10,
+  },
+  breathingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5C451',
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#D4A574',
+    fontWeight: '800',
+    letterSpacing: 2,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1C1B17',
     textAlign: 'center',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#FF5722',
-    textAlign: 'center',
-    marginBottom: 15,
-    fontWeight: '500',
+    marginBottom: 16,
+    letterSpacing: -0.5,
   },
   description: {
-    fontSize: 14,
-    color: '#ccc',
+    fontSize: 16,
+    color: '#7E7767',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 24,
+    maxWidth: 320,
+    fontWeight: '500',
   },
-  progressContainer: {
+  buttonContainer: {
     width: '100%',
-    marginBottom: 40,
-    alignItems: 'center',
   },
-  progressBackground: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressBar: {
-    width: 100,
-    height: 6,
-    backgroundColor: '#FF5722',
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  homeButton: {
+  backHomeButton: {
     flexDirection: 'row',
-    backgroundColor: '#FF5722',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 160,
+    backgroundColor: '#F5C451',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    gap: 10,
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  homeIcon: {
-    marginRight: 8,
-  },
-  homeButtonText: {
-    color: '#fff',
+  backHomeText: {
+    color: '#1C1B17',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
 });

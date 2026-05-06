@@ -2,7 +2,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -72,8 +73,9 @@ const FETCH_TIMEOUT = 15000; // 15 seconds
 const RETRY_DELAY = 2000; // 2 seconds
 
 export default function AddCollection() {
-  const router = useRouter();
-  const params = useLocalSearchParams();
+  const navigation = useNavigation();
+  const route = useRoute();
+  const params = route.params || {};
   
   const editData = params.editData ? JSON.parse(params.editData as string) as CollectionEntry : null;
 
@@ -177,12 +179,12 @@ export default function AddCollection() {
         return credentials;
       } else {
         console.log('❌ No credentials found, redirecting to login');
-        router.replace('/login');
+        navigation.replace('Login');
         return null;
       }
     } catch (error) {
       console.error('❌ Error initializing user:', error);
-      router.replace('/login');
+      navigation.replace('Login');
       return null;
     }
   };
@@ -811,7 +813,7 @@ export default function AddCollection() {
         
         setTimeout(() => {
           setShowSuccessCard(false);
-          router.back();
+          navigation.goBack();
         }, 2000);
         
         return;
@@ -892,7 +894,7 @@ export default function AddCollection() {
         
         setTimeout(() => {
           setShowSuccessCard(false);
-          router.back();
+          navigation.goBack();
         }, 2000);
         
       } else {
@@ -1027,21 +1029,21 @@ export default function AddCollection() {
   }
 
   return (
-    <SafeAreaView style={styles.fullPageModal}>
+    <View style={styles.fullPageModal}>
       <View style={styles.fullPageHeader}>
         <TouchableOpacity
           onPress={() => {
             resetForm();
-            router.back();
+            navigation.goBack();
           }}
           style={styles.modalCloseButton}
         >
-          <Ionicons name="close" size={24} color="#333" />
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
         </TouchableOpacity>
         <Text style={styles.fullPageTitle}>
           {editData ? 'Edit Collection' : 'Add Collection'}
         </Text>
-        <View style={styles.modalCloseButton} />
+        <View style={{ width: 44 }} />
       </View>
 
       <KeyboardAvoidingView 
@@ -1188,7 +1190,7 @@ export default function AddCollection() {
                       value={item.value}
                       onChangeText={item.onChangeText}
                       keyboardType={item.keyboardType}
-                      placeholderTextColor="#5659b5ff"
+                      placeholderTextColor="#999"
                       editable={item.editable !== false}
                     />
                   </View>
@@ -1204,7 +1206,7 @@ export default function AddCollection() {
                       onChangeText={item.onChangeText}
                       multiline
                       numberOfLines={3}
-                      placeholderTextColor="#35810fff"
+                      placeholderTextColor="#999"
                       textAlignVertical="top"
                     />
                   </View>
@@ -1470,129 +1472,154 @@ export default function AddCollection() {
           </View>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   fullPageModal: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FAF9F6',
   },
   fullPageHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
   modalCloseButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FEF8E7',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   fullPageTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333333',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
   },
   fullPageContent: {
     flex: 1,
-    backgroundColor: '#ffffff',
   },
   formList: {
     flex: 1,
   },
   formContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingTop: 20,
-    paddingBottom: 30,
+    paddingBottom: 100,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#5165c8ff',
-    marginBottom: 8,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7E7767',
+    marginBottom: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
   paymentMethodContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
   paymentMethodButton: {
     flex: 1,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: 20,
     paddingHorizontal: 12,
     borderWidth: 2,
-    borderColor: '#d0d7de',
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
   },
   paymentMethodButtonActive: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#f1f8f4',
+    borderColor: '#D4A574',
+    borderWidth: 2,
+    backgroundColor: '#FEF8E7',
+    shadowColor: '#D4A574',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
   },
   paymentMethodText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#666666ff',
+    color: '#7E7767',
   },
   paymentMethodTextActive: {
-    color: '#4CAF50',
+    color: '#1C1B17',
+    fontWeight: '700',
   },
   dropdownButton: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#e9931aff',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: '#fbefefe3',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
   },
   dropdownButtonText: {
-    fontSize: 17,
-    color: '#333333',
+    fontSize: 15,
+    color: '#1C1B17',
+    fontWeight: '600',
     flex: 1,
   },
   placeholderText: {
-    color: '#f6660cff',
+    color: '#7E7767',
+    fontWeight: '500',
   },
   textInput: {
-    borderWidth: 1,
-    borderColor: '#d0d7de',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333333',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 15,
+    color: '#1C1B17',
+    fontWeight: '600',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
   },
   notesInput: {
-    minHeight: 80,
+    minHeight: 120,
     textAlignVertical: 'top',
-    borderColor: '#1baa2cff',
-    backgroundColor: '#e6f4ea',
   },
   placeInput: {
-    backgroundColor: '#e6eff8ff',
-    borderWidth: 1,
-    borderColor: '#7aaed4ff',
-    color: '#c83030ff',
+    backgroundColor: '#FFFFFF',
   },
   customerItemContainer: {
     flex: 1,
@@ -1604,82 +1631,92 @@ const styles = StyleSheet.create({
   },
   customerNameText: {
     fontSize: 16,
-    color: '#ca2323ff',
-    fontWeight: '500',
+    color: '#1C1B17',
+    fontWeight: '700',
     flex: 1,
   },
   manualBadge: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: '#D4A574',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   manualBadgeText: {
-    color: '#ffffff',
+    color: '#1C1B17',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   customerPlaceText: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 2,
-    fontStyle: 'italic',
+    fontSize: 13,
+    color: '#7E7767',
+    marginTop: 4,
+    fontWeight: '500',
   },
   amountInput: {
-    borderWidth: 1,
-    borderColor: '#d0d7de',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333333',
-    backgroundColor: '#c3d2fd61',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 18,
+    color: '#1C1B17',
+    fontWeight: '700',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
   },
   imageButton: {
     borderWidth: 2,
-    borderColor: '#1b69b7ff',
+    borderColor: '#D4A574',
     borderStyle: 'dashed',
-    borderRadius: 8,
-    height: 120,
+    borderRadius: 16,
+    height: 140,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#FEF8E7',
   },
   imageButtonContent: {
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   imageButtonText: {
     fontSize: 14,
-    color: '#666666',
+    color: '#7E7767',
     textAlign: 'center',
+    fontWeight: '600',
   },
   previewImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 6,
+    borderRadius: 14,
   },
   submitButtonContainer: {
-    marginTop: 20,
+    marginTop: 32,
+    marginBottom: 20,
   },
   submitButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    paddingVertical: 16,
+    backgroundColor: '#1C1B17',
+    borderRadius: 50,
+    paddingVertical: 20,
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowColor: '#1C1B17',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
   submitButtonDisabled: {
     opacity: 0.6,
   },
   submitButtonText: {
-    color: '#ffffff',
+    color: '#F5C451',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
+    letterSpacing: 1,
   },
   manualCustomerForm: {
     padding: 20,
@@ -1688,82 +1725,100 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   manualInputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7E7767',
+    marginBottom: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
   manualTextInput: {
-    borderWidth: 1,
-    borderColor: '#d0d7de',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333333',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 15,
+    color: '#1C1B17',
+    fontWeight: '600',
   },
   manualAddButton: {
     flexDirection: 'row',
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    paddingVertical: 16,
+    backgroundColor: '#D4A574',
+    borderRadius: 50,
+    paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: 10,
+    gap: 10,
+    marginTop: 20,
+    shadowColor: '#D4A574',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 6,
   },
   manualAddButtonText: {
-    color: '#ffffff',
+    color: '#1C1B17',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   fullScreenDropdownModal: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FAF9F6',
   },
   fullScreenDropdownHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#c22f2fff',
-    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 0,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
   fullScreenBackButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FEF8E7',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   fullScreenDropdownTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333333',
+    fontWeight: '800',
+    color: '#1C1B17',
   },
   fullScreenSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginVertical: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#f89494ff',
+    marginHorizontal: 24,
+    marginVertical: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   searchIcon: {
-    marginRight: 10,
+    marginRight: 12,
   },
   fullScreenSearchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#131212ff',
+    color: '#1C1B17',
+    fontWeight: '600',
     padding: 0,
   },
   fullScreenDropdownList: {
@@ -1780,39 +1835,49 @@ const styles = StyleSheet.create({
   },
   emptySearchText: {
     fontSize: 16,
-    color: '#999',
+    color: '#7E7767',
     marginTop: 12,
     textAlign: 'center',
     paddingHorizontal: 20,
+    fontWeight: '600',
   },
   retryText: {
     fontSize: 14,
-    color: '#4CAF50',
+    color: '#D4A574',
     marginTop: 8,
     textAlign: 'center',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   dropdownItem: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    marginHorizontal: 24,
+    marginBottom: 8,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
   },
   dropdownItemText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#1C1B17',
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FAF9F6',
   },
   loadingText: {
-    color: '#ffffff',
+    color: '#1C1B17',
     marginTop: 10,
     fontSize: 16,
+    fontWeight: '700',
   },
   centeredLoader: {
     position: 'absolute',
@@ -1826,33 +1891,38 @@ const styles = StyleSheet.create({
     zIndex: 9999,
   },
   loaderBackground: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    padding: 24,
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    padding: 32,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 140,
-    minHeight: 140,
+    minWidth: 160,
+    minHeight: 160,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
   },
   loaderText: {
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: '#1C1B17',
   },
   successCard: {
     position: 'absolute',
     top: '50%',
-    left: 20,
-    right: 20,
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    padding: 16,
-    elevation: 8,
+    left: 24,
+    right: 24,
+    backgroundColor: '#1C1B17',
+    borderRadius: 24,
+    padding: 24,
+    elevation: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
     zIndex: 9999,
     transform: [{ translateY: -50 }],
   },
@@ -1863,10 +1933,10 @@ const styles = StyleSheet.create({
   },
   successCardText: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 16,
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fbf9f9ff',
+    fontWeight: '700',
+    color: '#F5C451',
   },
   successCardClose: {
     padding: 4,

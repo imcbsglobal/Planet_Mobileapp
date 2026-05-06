@@ -1,4 +1,4 @@
-package com.adila2005.imcmobileapp
+package com.myimc2006.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

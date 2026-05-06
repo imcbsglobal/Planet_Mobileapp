@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test - MY IMC (CORS Proxy)</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; background: #f5f5f5; }
+        h1 { color: #333; text-align: center; }
+        h2 { color: #666; margin-top: 30px; border-bottom: 2px solid #f4c84a; padding-bottom: 5px; }
+        .proxy-toggle { background: #e3f2fd; padding: 15px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #2196f3; }
+        form { background: white; padding: 20px; border-radius: 8px; margin: 15px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        label { display: block; margin: 10px 0; font-weight: 500; }
+        input, select { padding: 10px; width: 100%; max-width: 400px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        button { background: #f4c84a; color: #000; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 10px; font-size: 14px; }
+        button:hover { background: #e5b939; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 400px; overflow-y: auto; }
+        .success { border-left: 4px solid #4caf50; }
+        .error { border-left: 4px solid #f44336; }
+        .loading { color: #2196f3; font-weight: bold; }
+        .info { background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 MY IMC API Test (Browser Compatible)</h1>
+    
+    <div class="proxy-toggle">
+        <strong>🌐 CORS Proxy Mode:</strong><br>
+        <label>
+            <input type="checkbox" id="useProxy" checked> Use CORS Proxy (Enable this to test in browser directly)
+        </label>
+        <p style="margin: 10px 0 0 0; font-size: 13px; color: #555;">
+            When enabled, requests go through a proxy server to bypass CORS restrictions.
+        </p>
+    </div>
+
+    <h2>1. Login API</h2>
+    <form id="loginForm">
+        <label>User ID: <input type="text" id="loginUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="loginPassword" placeholder="Enter your password"></label>
+        <button type="submit">🔐 Test Login</button>
+    </form>
+    <pre id="loginResult"></pre>
+
+    <h2>2. Punch In API</h2>
+    <form id="punchInForm">
+        <label>User ID: <input type="text" id="punchInUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="punchInPassword" placeholder="Enter your password"></label>
+        <label>Location: <input type="text" id="punchInLocation" value="Test Location"></label>
+        <label>Latitude: <input type="text" id="punchInLat" value="0.0"></label>
+        <label>Longitude: <input type="text" id="punchInLon" value="0.0"></label>
+        <button type="submit">👆 Test Punch In</button>
+    </form>
+    <pre id="punchInResult"></pre>
+
+    <h2>3. Punch Out API</h2>
+    <form id="punchOutForm">
+        <label>User ID: <input type="text" id="punchOutUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="punchOutPassword" placeholder="Enter your password"></label>
+        <label>Location: <input type="text" id="punchOutLocation" value="Test Location"></label>
+        <label>Latitude: <input type="text" id="punchOutLat" value="0.0"></label>
+        <label>Longitude: <input type="text" id="punchOutLon" value="0.0"></label>
+        <button type="submit">👋 Test Punch Out</button>
+    </form>
+    <pre id="punchOutResult"></pre>
+
+    <h2>4. Monthly Attendance API</h2>
+    <form id="monthlyForm">
+        <label>User ID: <input type="text" id="monthlyUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="monthlyPassword" placeholder="Enter your password"></label>
+        <label>Month: <input type="number" id="monthlyMonth" value="1" min="1" max="12"></label>
+        <label>Year: <input type="number" id="monthlyYear" value="2025"></label>
+        <button type="submit">📅 Test Monthly Attendance</button>
+    </form>
+    <pre id="monthlyResult"></pre>
+
+    <h2>5. Break Punch In API</h2>
+    <form id="breakInForm">
+        <label>User ID: <input type="text" id="breakInUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="breakInPassword" placeholder="Enter your password"></label>
+        <button type="submit">☕ Test Break In</button>
+    </form>
+    <pre id="breakInResult"></pre>
+
+    <h2>6. Break Punch Out API</h2>
+    <form id="breakOutForm">
+        <label>User ID: <input type="text" id="breakOutUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="breakOutPassword" placeholder="Enter your password"></label>
+        <button type="submit">✅ Test Break Out</button>
+    </form>
+    <pre id="breakOutResult"></pre>
+
+    <h2>7. Break Status API</h2>
+    <form id="breakStatusForm">
+        <label>User ID: <input type="text" id="breakStatusUserId" placeholder="Enter your user ID"></label>
+        <label>Password: <input type="password" id="breakStatusPassword" placeholder="Enter your password"></label>
+        <button type="submit">📊 Test Break Status</button>
+    </form>
+    <pre id="breakStatusResult"></pre>
+
+    <h2>8. Feeder - List All</h2>
+    <form id="feederListForm">
+        <button type="submit">📋 Get All Feeders</button>
+    </form>
+    <pre id="feederListResult"></pre>
+
+    <h2>9. Feeder - Create New</h2>
+    <form id="feederCreateForm">
+        <label>Name: <input type="text" id="feederName" placeholder="Feeder name" required></label>
+        <label>Address: <input type="text" id="feederAddress" placeholder="Full address" required></label>
+        <label>Location: <input type="text" id="feederLocation" placeholder="Location" required></label>
+        <label>Area: <input type="text" id="feederArea" placeholder="Area" required></label>
+        <label>District: <input type="text" id="feederDistrict" placeholder="District" required></label>
+        <label>State: <input type="text" id="feederState" placeholder="State" required></label>
+        <label>Pincode: <input type="text" id="feederPincode" placeholder="Pincode" required></label>
+        <label>Contact Person: <input type="text" id="feederContactPerson" placeholder="Contact person name" required></label>
+        <label>Contact Number: <input type="text" id="feederContactNumber" placeholder="Phone number" required></label>
+        <label>Email: <input type="email" id="feederEmail" placeholder="Email address" required></label>
+        <label>Software: <input type="text" id="feederSoftware" placeholder="Software name" required></label>
+        <label>No. of Systems: <input type="number" id="feederNoOfSystem" placeholder="Number of systems" required></label>
+        <label>Installation Date: <input type="date" id="feederInstallationDate" required></label>
+        <label>Software Amount: <input type="number" step="0.01" id="feederSoftwareAmount" placeholder="Amount" required></label>
+        <label>Module Charges: <input type="number" step="0.01" id="feederModuleCharges" placeholder="Charges" required></label>
+        <label>Status: 
+            <select id="feederStatus" required>
+                <option value="">Select Status</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="in_progress">In Progress</option>
+            </select>
+        </label>
+        <label>Branch ID: <input type="number" id="feederBranchId" placeholder="Branch ID (optional)"></label>
+        <button type="submit">➕ Create Feeder</button>
+    </form>
+    <pre id="feederCreateResult"></pre>
+
+    <h2>10. Feeder - Get by ID</h2>
+    <form id="feederGetForm">
+        <label>Feeder ID: <input type="number" id="feederGetId" placeholder="Enter feeder ID"></label>
+        <button type="submit">🔍 Get Feeder</button>
+    </form>
+    <pre id="feederGetResult"></pre>
+
+    <h2>11. Feeder - Update</h2>
+    <form id="feederUpdateForm">
+        <label>Feeder ID: <input type="number" id="feederUpdateId" placeholder="Enter feeder ID" required></label>
+        <label>Name: <input type="text" id="feederUpdateName" placeholder="New name"></label>
+        <label>Address: <input type="text" id="feederUpdateAddress" placeholder="Address"></label>
+        <label>Location: <input type="text" id="feederUpdateLocation" placeholder="Location"></label>
+        <label>Area: <input type="text" id="feederUpdateArea" placeholder="Area"></label>
+        <label>District: <input type="text" id="feederUpdateDistrict" placeholder="District"></label>
+        <label>State: <input type="text" id="feederUpdateState" placeholder="State"></label>
+        <label>Pincode: <input type="text" id="feederUpdatePincode" placeholder="Pincode"></label>
+        <label>Contact Person: <input type="text" id="feederUpdateContactPerson" placeholder="Contact person"></label>
+        <label>Contact Number: <input type="text" id="feederUpdateContactNumber" placeholder="Phone"></label>
+        <label>Email: <input type="email" id="feederUpdateEmail" placeholder="Email"></label>
+        <label>Status: 
+            <select id="feederUpdateStatus">
+                <option value="">Don't change</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="in_progress">In Progress</option>
+            </select>
+        </label>
+        <label>Branch ID: <input type="number" id="feederUpdateBranchId" placeholder="Branch ID"></label>
+        <button type="submit">✏️ Update Feeder</button>
+    </form>
+    <pre id="feederUpdateResult"></pre>
+
+    <h2>12. Feeder - Delete</h2>
+    <form id="feederDeleteForm">
+        <label>Feeder ID: <input type="number" id="feederDeleteId" placeholder="Enter feeder ID"></label>
+        <button type="submit" style="background: #f44336;">🗑️ Delete Feeder</button>
+    </form>
+    <pre id="feederDeleteResult"></pre>
+
+    <h2>13. Feeder - Filter by Status</h2>
+    <form id="feederStatusFilterForm">
+        <label>Status: 
+            <select id="feederFilterStatus">
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="in_progress">In Progress</option>
+            </select>
+        </label>
+        <button type="submit">🔎 Filter by Status</button>
+    </form>
+    <pre id="feederStatusFilterResult"></pre>
+
+    <h2>14. Feeder - Filter by Branch</h2>
+    <form id="feederBranchFilterForm">
+        <label>Branch ID: <input type="number" id="feederFilterBranchId" placeholder="Enter branch ID"></label>
+        <button type="submit">🔎 Filter by Branch</button>
+    </form>
+    <pre id="feederBranchFilterResult"></pre>
+
+    <script>
+        const CORS_PROXY = 'https://corsproxy.io/?';
+        
+        function getApiUrl(url) {
+            const useProxy = document.getElementById('useProxy').checked;
+            return useProxy ? CORS_PROXY + encodeURIComponent(url) : url;
+        }
+
+        async function makeRequest(url, options, resultElementId) {
+            const resultEl = document.getElementById(resultElementId);
+            const form = resultEl.previousElementSibling;
+            const btn = form.querySelector('button');
+            
+            btn.disabled = true;
+            resultEl.textContent = '⏳ Loading...';
+            resultEl.className = 'loading';
+            
+            try {
+                const finalUrl = getApiUrl(url);
+                console.log('Request URL:', finalUrl);
+                console.log('Request options:', options);
+                
+                const response = await fetch(finalUrl, options);
+                const data = await response.json();
+                
+                resultEl.textContent = `Status: ${response.status} ${response.statusText}\n\n${JSON.stringify(data, null, 2)}`;
+                resultEl.className = response.ok ? 'success' : 'error';
+            } catch (error) {
+                resultEl.textContent = `❌ Error: ${error.message}\n\nTroubleshooting:\n1. Make sure CORS Proxy is enabled (checkbox above)\n2. Check your internet connection\n3. Verify the API endpoint is correct\n4. Try using start-server.bat instead`;
+                resultEl.className = 'error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Login API
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('loginUserId').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            if (!userid || !password) {
+                alert('Please enter both User ID and Password');
+                return;
+            }
+            
+            await makeRequest(
+                'https://myimc.in/flutter/login/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userid, password })
+                },
+                'loginResult'
+            );
+        });
+
+        // Punch In API
+        document.getElementById('punchInForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('punchInUserId').value;
+            const password = document.getElementById('punchInPassword').value;
+            const location = document.getElementById('punchInLocation').value;
+            const latitude = document.getElementById('punchInLat').value;
+            const longitude = document.getElementById('punchInLon').value;
+            
+            await makeRequest(
+                'https://myimc.in/flutter/punch-in/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userid, password, location, latitude, longitude, 
+                        enhanced_location: JSON.stringify({city: location}) 
+                    })
+                },
+                'punchInResult'
+            );
+        });
+
+        // Punch Out API
+        document.getElementById('punchOutForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('punchOutUserId').value;
+            const password = document.getElementById('punchOutPassword').value;
+            const location = document.getElementById('punchOutLocation').value;
+            const latitude = document.getElementById('punchOutLat').value;
+            const longitude = document.getElementById('punchOutLon').value;
+            
+            await makeRequest(
+                'https://myimc.in/flutter/punch-out/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        userid, password, location, latitude, longitude, 
+                        enhanced_location: JSON.stringify({city: location}) 
+                    })
+                },
+                'punchOutResult'
+            );
+        });
+
+        // Monthly Attendance API
+        document.getElementById('monthlyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('monthlyUserId').value;
+            const password = document.getElementById('monthlyPassword').value;
+            const month = document.getElementById('monthlyMonth').value;
+            const year = document.getElementById('monthlyYear').value;
+            
+            await makeRequest(
+                `https://myimc.in/flutter/attendance/monthly/?userid=${userid}&password=${password}&month=${month}&year=${year}`,
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'monthlyResult'
+            );
+        });
+
+        // Break Punch In API
+        document.getElementById('breakInForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('breakInUserId').value;
+            const password = document.getElementById('breakInPassword').value;
+            
+            await makeRequest(
+                'https://myimc.in/flutter/break-punch-in/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userid, password })
+                },
+                'breakInResult'
+            );
+        });
+
+        // Break Punch Out API
+        document.getElementById('breakOutForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('breakOutUserId').value;
+            const password = document.getElementById('breakOutPassword').value;
+            
+            await makeRequest(
+                'https://myimc.in/flutter/break-punch-out/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userid, password })
+                },
+                'breakOutResult'
+            );
+        });
+
+        // Break Status API
+        document.getElementById('breakStatusForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userid = document.getElementById('breakStatusUserId').value;
+            const password = document.getElementById('breakStatusPassword').value;
+            
+            await makeRequest(
+                'https://myimc.in/flutter/break-status/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userid, password })
+                },
+                'breakStatusResult'
+            );
+        });
+
+        // Feeder - List All
+        document.getElementById('feederListForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await makeRequest(
+                'https://myimc.in/api/feeders/',
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'feederListResult'
+            );
+        });
+
+        // Feeder - Create New
+        document.getElementById('feederCreateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('feederName').value;
+            const address = document.getElementById('feederAddress').value;
+            const location = document.getElementById('feederLocation').value;
+            const area = document.getElementById('feederArea').value;
+            const district = document.getElementById('feederDistrict').value;
+            const state = document.getElementById('feederState').value;
+            const pincode = document.getElementById('feederPincode').value;
+            const contact_person = document.getElementById('feederContactPerson').value;
+            const contact_number = document.getElementById('feederContactNumber').value;
+            const email = document.getElementById('feederEmail').value;
+            const software = document.getElementById('feederSoftware').value;
+            const no_of_system = document.getElementById('feederNoOfSystem').value;
+            const installation_date = document.getElementById('feederInstallationDate').value;
+            const software_amount = document.getElementById('feederSoftwareAmount').value;
+            const module_charges = document.getElementById('feederModuleCharges').value;
+            const status = document.getElementById('feederStatus').value;
+            const branch_id = document.getElementById('feederBranchId').value;
+            
+            const feederData = {
+                name,
+                address,
+                location,
+                area,
+                district,
+                state,
+                pincode,
+                contact_person,
+                contact_number,
+                email,
+                software,
+                no_of_system: parseInt(no_of_system),
+                installation_date,
+                software_amount: parseFloat(software_amount),
+                module_charges: parseFloat(module_charges),
+                status
+            };
+            
+            if (branch_id) {
+                feederData.branch_id = parseInt(branch_id);
+            }
+            
+            await makeRequest(
+                'https://myimc.in/api/feeders/',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(feederData)
+                },
+                'feederCreateResult'
+            );
+        });
+
+        // Feeder - Get by ID
+        document.getElementById('feederGetForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('feederGetId').value;
+            
+            if (!id) {
+                alert('Please enter feeder ID');
+                return;
+            }
+            
+            await makeRequest(
+                `https://myimc.in/api/feeders/${id}/`,
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'feederGetResult'
+            );
+        });
+
+        // Feeder - Update
+        document.getElementById('feederUpdateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('feederUpdateId').value;
+            
+            if (!id) {
+                alert('Please enter feeder ID');
+                return;
+            }
+            
+            const updateData = {};
+            
+            const name = document.getElementById('feederUpdateName').value;
+            const address = document.getElementById('feederUpdateAddress').value;
+            const location = document.getElementById('feederUpdateLocation').value;
+            const area = document.getElementById('feederUpdateArea').value;
+            const district = document.getElementById('feederUpdateDistrict').value;
+            const state = document.getElementById('feederUpdateState').value;
+            const pincode = document.getElementById('feederUpdatePincode').value;
+            const contact_person = document.getElementById('feederUpdateContactPerson').value;
+            const contact_number = document.getElementById('feederUpdateContactNumber').value;
+            const email = document.getElementById('feederUpdateEmail').value;
+            const status = document.getElementById('feederUpdateStatus').value;
+            const branch_id = document.getElementById('feederUpdateBranchId').value;
+            
+            if (name) updateData.name = name;
+            if (address) updateData.address = address;
+            if (location) updateData.location = location;
+            if (area) updateData.area = area;
+            if (district) updateData.district = district;
+            if (state) updateData.state = state;
+            if (pincode) updateData.pincode = pincode;
+            if (contact_person) updateData.contact_person = contact_person;
+            if (contact_number) updateData.contact_number = contact_number;
+            if (email) updateData.email = email;
+            if (status) updateData.status = status;
+            if (branch_id) updateData.branch_id = parseInt(branch_id);
+            
+            await makeRequest(
+                `https://myimc.in/api/feeders/${id}/`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updateData)
+                },
+                'feederUpdateResult'
+            );
+        });
+
+        // Feeder - Delete
+        document.getElementById('feederDeleteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('feederDeleteId').value;
+            
+            if (!id) {
+                alert('Please enter feeder ID');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete this feeder?')) {
+                return;
+            }
+            
+            await makeRequest(
+                `https://myimc.in/api/feeders/${id}/`,
+                {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'feederDeleteResult'
+            );
+        });
+
+        // Feeder - Filter by Status
+        document.getElementById('feederStatusFilterForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const status = document.getElementById('feederFilterStatus').value;
+            
+            await makeRequest(
+                `https://myimc.in/api/feeders/by_status/?status=${status}`,
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'feederStatusFilterResult'
+            );
+        });
+
+        // Feeder - Filter by Branch
+        document.getElementById('feederBranchFilterForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const branch_id = document.getElementById('feederFilterBranchId').value;
+            
+            if (!branch_id) {
+                alert('Please enter branch ID');
+                return;
+            }
+            
+            await makeRequest(
+                `https://myimc.in/api/feeders/by_branch/?branch_id=${branch_id}`,
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                },
+                'feederBranchFilterResult'
+            );
+        });
+    </script>
+</body>
+</html>

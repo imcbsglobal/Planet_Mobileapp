@@ -1,193 +1,154 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
 import {
     Animated,
-    Dimensions,
-    Easing,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
 export default function Target() {
-  const router = useRouter();
+  const navigation = useNavigation();
   
-  // Animation values
-  const pulseValue = new Animated.Value(1);
-  const growValue = new Animated.Value(0);
-  const arrowValue = new Animated.Value(0);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const dotAnim = useRef(new Animated.Value(1)).current;
 
-  // Grow animation
-  React.useEffect(() => {
-    const growAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(growValue, {
-          toValue: 1,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(growValue, {
-          toValue: 0,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    // Pulse animation
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseValue, {
-          toValue: 1.2,
-          duration: 1500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseValue, {
-          toValue: 1,
-          duration: 1500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    // Arrow animation
-    const arrowAnimation = Animated.loop(
-      Animated.timing(arrowValue, {
+  useEffect(() => {
+    // Fade and slide animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 1000,
-        easing: Easing.linear,
+        duration: 800,
         useNativeDriver: true,
-      })
-    );
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        tension: 50,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
 
-    growAnimation.start();
-    pulseAnimation.start();
-    arrowAnimation.start();
+    // Icon pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
 
-    return () => {
-      growAnimation.stop();
-      pulseAnimation.stop();
-      arrowAnimation.stop();
-    };
+    // Dot breathing animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, {
+          toValue: 1.5,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(dotAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
   }, []);
-
-  // Interpolate animations
-  const grow = growValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.8, 1.2],
-  });
-
-  const pulse = pulseValue;
-  
-  const arrowMove = arrowValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 20],
-  });
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={['#FDFCF8', '#FFF8E7', '#FFE5B4']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Target Tracking</Text>
-        <View style={styles.headerPlaceholder} />
+        <Text style={styles.headerTitle}>Targets</Text>
+        <View style={styles.placeholder} />
       </View>
 
-      {/* Main Content */}
+      {/* Content */}
       <View style={styles.content}>
-        {/* Animated Target Icon */}
         <Animated.View 
           style={[
             styles.iconContainer,
-            { 
+            {
+              opacity: fadeAnim,
               transform: [
-                { scale: grow },
-                { scale: pulse }
-              ] 
-            }
+                { translateY: slideAnim },
+                { scale: pulseAnim },
+              ],
+            },
           ]}
         >
-          <Ionicons name="trending-up" size={80} color="#009688" />
+          <View style={styles.iconCircle}>
+            <Ionicons name="trophy" size={80} color="#F5C451" />
+          </View>
         </Animated.View>
 
-        {/* Arrow Animation */}
-        <View style={styles.arrowContainer}>
-          <Animated.View 
-            style={[
-              styles.arrow,
-              { 
-                transform: [
-                  { translateY: arrowMove }
-                ] 
-              }
-            ]}
-          >
-            <Ionicons name="arrow-up" size={40} color="#4CAF50" />
-          </Animated.View>
-        </View>
-
-        {/* Work in Progress Text */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.textContainer,
-            { transform: [{ scale: pulse }] }
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
           ]}
         >
-          <Text style={styles.title}>Target Dashboard Coming Soon</Text>
-          <Text style={styles.subtitle}>
-            Aiming for your success!
-          </Text>
+          <View style={styles.statusBadge}>
+            <Animated.View 
+              style={[
+                styles.breathingDot,
+                { transform: [{ scale: dotAnim }] },
+              ]} 
+            />
+            <Text style={styles.statusText}>COMING SOON</Text>
+          </View>
+          <Text style={styles.title}>Target Dashboard</Text>
           <Text style={styles.description}>
-            Our target tracking system is currently in development. 
-            Soon you'll be able to set goals, track progress, 
-            visualize achievements, and optimize your performance strategies.
+            Track your goals and achievements. Our target tracking system is currently under development.
           </Text>
         </Animated.View>
 
-        {/* Progress Animation */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBackground}>
-            <Animated.View 
-              style={[
-                styles.progressBar,
-                { 
-                  transform: [
-                    { 
-                      translateX: arrowValue.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-100, width - 100],
-                      }) 
-                    }
-                  ] 
-                }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>Raising the bar...</Text>
-        </View>
-
-        {/* Back to Home Button */}
-        <TouchableOpacity 
-          style={[styles.homeButton, { backgroundColor: '#009688' }]}
-          onPress={() => router.push('/')}
+        <Animated.View
+          style={[
+            styles.buttonContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
         >
-          <Ionicons name="home" size={20} color="#fff" style={styles.homeIcon} />
-          <Text style={styles.homeButtonText}>Back to Home</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.backHomeButton}
+            onPress={() => navigation.navigate('HomeNew')}
+          >
+            <Ionicons name="home" size={20} color="#1C1B17" />
+            <Text style={styles.backHomeText}>Back to Home</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </View>
     </View>
   );
@@ -196,114 +157,115 @@ export default function Target() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FDFCF8',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: 0.5,
   },
-  headerPlaceholder: {
+  placeholder: {
     width: 40,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 30,
+    paddingHorizontal: 40,
   },
   iconContainer: {
-    marginBottom: 30,
-    alignItems: 'center',
-  },
-  arrowContainer: {
-    position: 'relative',
     marginBottom: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 60,
   },
-  arrow: {
-    position: 'absolute',
+  iconCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(245, 196, 81, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
+    elevation: 12,
   },
   textContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 50,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 196, 81, 0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    marginBottom: 24,
+    gap: 10,
+  },
+  breathingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5C451',
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#D4A574',
+    fontWeight: '800',
+    letterSpacing: 2,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1C1B17',
     textAlign: 'center',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#009688',
-    textAlign: 'center',
-    marginBottom: 15,
-    fontWeight: '500',
+    marginBottom: 16,
+    letterSpacing: -0.5,
   },
   description: {
-    fontSize: 14,
-    color: '#ccc',
+    fontSize: 16,
+    color: '#7E7767',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 24,
+    maxWidth: 320,
+    fontWeight: '500',
   },
-  progressContainer: {
+  buttonContainer: {
     width: '100%',
-    marginBottom: 40,
-    alignItems: 'center',
   },
-  progressBackground: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressBar: {
-    width: 100,
-    height: 6,
-    backgroundColor: '#009688',
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  homeButton: {
+  backHomeButton: {
     flexDirection: 'row',
-    backgroundColor: '#009688',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 160,
+    backgroundColor: '#F5C451',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    gap: 10,
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  homeIcon: {
-    marginRight: 8,
-  },
-  homeButtonText: {
-    color: '#fff',
+  backHomeText: {
+    color: '#1C1B17',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
 });

@@ -1,11 +1,13 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useNavigation } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -56,12 +58,12 @@ const API_BASE_URL = 'https://myimc.in/app4/api';
 const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
 const CARD_COLORS = [
-  '#fbf8e7ff',
-  '#fcd9e3ff',
+  '#FFFFFF',
+  '#FFFFFF',
 ];
 
 export default function Collection() {
-  const router = useRouter();
+  const navigation = useNavigation();
 
   const [isInitializing, setIsInitializing] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,6 +78,11 @@ export default function Collection() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const [isLoadingCollections, setIsLoadingCollections] = useState(true);
+  
+  // Animation values for loading dots
+  const dot1Anim = useRef(new Animated.Value(0)).current;
+  const dot2Anim = useRef(new Animated.Value(0)).current;
+  const dot3Anim = useRef(new Animated.Value(0)).current;
 
   // Initialize user credentials
   const initializeUser = async () => {
@@ -90,12 +97,12 @@ export default function Collection() {
         setUserCredentials({ userId, password });
         return true;
       } else {
-        router.replace('/login');
+        navigation.replace('Login');
         return false;
       }
     } catch (error) {
       console.error('Error initializing user:', error);
-      router.replace('/login');
+      navigation.replace('Login');
       return false;
     }
   };
@@ -404,13 +411,17 @@ export default function Collection() {
     try {
       setIsLoadingCollections(true);
       
+      // Load from cache first for instant display
+      await loadCachedCollections();
+      
+      // Then fetch fresh data in background
       if (customers.length === 0) {
-        await fetchCustomers();
+        fetchCustomers(); // Don't await - run in parallel
       }
       
       // Make sure branches are loaded
       if (branches.length === 0) {
-        await fetchBranches();
+        fetchBranches(); // Don't await - run in parallel
       }
       
       // First, try to fetch from API
@@ -623,6 +634,9 @@ export default function Collection() {
       console.log(`Setting ${fixedCollections.length} total collections`);
       setCollections(fixedCollections);
       
+      // Update loading state immediately after setting collections
+      setIsLoadingCollections(false);
+      
     } catch (error) {
       console.error('Error in fetchCollections:', error);
       await loadCachedCollections();
@@ -644,39 +658,47 @@ export default function Collection() {
       if (storedCollections) {
         const collectionsData: CollectionEntry[] = JSON.parse(storedCollections);
         
-        const fixedCollections = collectionsData.map((collection) => {
-          let customerPlace = collection.customerPlace;
-          if (!customerPlace || customerPlace.trim() === '') {
-            const customerData = customers.find(c => c.id === collection.customerId || c.name === collection.customerName);
-            if (customerData && customerData.place) {
-              customerPlace = customerData.place;
-            }
-          }
-          
-          // Fix branch name
-          let branchName = collection.branchName;
-          if (branchName === 'Unknown Branch' && collection.branchId) {
-            const branchData = branches.find(b => b.id === collection.branchId);
-            if (branchData) {
-              branchName = branchData.name;
-            }
-          }
-          
-          return {
-            ...collection,
-            customerPlace: customerPlace || '',
-            branchName: branchName,
-            notes: collection.notes && collection.notes.trim() !== '' && collection.notes !== 'Collection payment' 
-              ? collection.notes 
-              : 'No notes',
-            screenshot: collection.screenshot,
-            paymentMethod: collection.paymentMethod || 'UPI',
-            userName: collection.userName || 'Unknown User',
-          };
-        });
+        // Set collections immediately without fixing - for instant display
+        setCollections(collectionsData);
+        setIsLoadingCollections(false);
         
-        setCollections(fixedCollections);
-        console.log(`Loaded ${fixedCollections.length} collections from cache`);
+        // Fix data in background
+        setTimeout(() => {
+          const fixedCollections = collectionsData.map((collection) => {
+            let customerPlace = collection.customerPlace;
+            if (!customerPlace || customerPlace.trim() === '') {
+              const customerData = customers.find(c => c.id === collection.customerId || c.name === collection.customerName);
+              if (customerData && customerData.place) {
+                customerPlace = customerData.place;
+              }
+            }
+            
+            // Fix branch name
+            let branchName = collection.branchName;
+            if (branchName === 'Unknown Branch' && collection.branchId) {
+              const branchData = branches.find(b => b.id === collection.branchId);
+              if (branchData) {
+                branchName = branchData.name;
+              }
+            }
+            
+            return {
+              ...collection,
+              customerPlace: customerPlace || '',
+              branchName: branchName,
+              notes: collection.notes && collection.notes.trim() !== '' && collection.notes !== 'Collection payment' 
+                ? collection.notes 
+                : 'No notes',
+              screenshot: collection.screenshot,
+              paymentMethod: collection.paymentMethod || 'UPI',
+              userName: collection.userName || 'Unknown User',
+            };
+          });
+          
+          setCollections(fixedCollections);
+        }, 100);
+        
+        console.log(`Loaded ${collectionsData.length} collections from cache`);
       }
     } catch (error) {
       console.error('Error loading cached collections:', error);
@@ -703,13 +725,48 @@ export default function Collection() {
 
   // Handle edit collection
   const handleEditCollection = useCallback((collection: CollectionEntry) => {
-    router.push({
-      pathname: '/addcollection',
-      params: {
-        editData: JSON.stringify(collection)
-      }
+    navigation.navigate('AddCollection', {
+      editData: JSON.stringify(collection)
     });
-  }, [router]);
+  }, [navigation]);
+
+  // Animated loading dots
+  useEffect(() => {
+    if (isLoadingCollections) {
+      const createDotAnimation = (animValue: Animated.Value, delay: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(animValue, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+            Animated.timing(animValue, {
+              toValue: 0,
+              duration: 300,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
+
+      const animations = Animated.parallel([
+        createDotAnimation(dot1Anim, 0),
+        createDotAnimation(dot2Anim, 100),
+        createDotAnimation(dot3Anim, 200),
+      ]);
+
+      animations.start();
+
+      return () => {
+        animations.stop();
+        dot1Anim.setValue(0);
+        dot2Anim.setValue(0);
+        dot3Anim.setValue(0);
+      };
+    }
+  }, [isLoadingCollections]);
 
   // Initialize
   useEffect(() => {
@@ -727,9 +784,12 @@ export default function Collection() {
         setIsLoadingData(true);
         setIsLoadingCollections(true);
         try {
-          await fetchBranches(); // Load branches first
-          await fetchCustomers();
-          await fetchCollections();
+          // Load all data in parallel for faster loading
+          await Promise.all([
+            fetchBranches(),
+            fetchCustomers(),
+            fetchCollections()
+          ]);
         } catch (error) {
           console.error('Error loading data:', error);
         } finally {
@@ -891,16 +951,16 @@ export default function Collection() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>COLLECTIONS</Text>
+        <Text style={styles.headerTitle}>Collections</Text>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => router.push('/addcollection')}
+          onPress={() => navigation.navigate('AddCollection')}
         >
-          <Ionicons name="add" size={24} color="#ffffff" />
+          <Ionicons name="add" size={24} color="#453714" />
         </TouchableOpacity>
       </View>
 
@@ -912,19 +972,70 @@ export default function Collection() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#ffffff"
+            tintColor="#F4C84A"
           />
         }
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           isLoadingCollections ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#ffffff" />
-              <Text style={styles.loadingText}>Loading collections...</Text>
+              <View style={styles.loadingContent}>
+                <View style={styles.loadingDotsContainer}>
+                  <Animated.View
+                    style={[
+                      styles.loadingDot,
+                      {
+                        opacity: dot1Anim,
+                        transform: [
+                          {
+                            scale: dot1Anim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.3],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.loadingDot,
+                      {
+                        opacity: dot2Anim,
+                        transform: [
+                          {
+                            scale: dot2Anim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.3],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={[
+                      styles.loadingDot,
+                      {
+                        opacity: dot3Anim,
+                        transform: [
+                          {
+                            scale: dot3Anim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 1.3],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.loadingText}>Loading collections</Text>
+              </View>
             </View>
           ) : (
           <View style={styles.emptyContainer}>
-            <Ionicons name="folder-open-outline" size={48} color="#666" />
+            <Ionicons name="folder-open-outline" size={48} color="#87847b" />
             <Text style={styles.emptyText}>No collections yet</Text>
             <Text style={styles.emptySubText}>Tap + to add your first collection entry</Text>
           </View>
@@ -970,66 +1081,94 @@ export default function Collection() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FAF9F6',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
-    backgroundColor: '#1a1a2e',
+  },
+  loadingContent: {
+    alignItems: 'center',
+  },
+  loadingDotsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  loadingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#F4C84A',
+    marginHorizontal: 6,
   },
   loadingText: {
-    color: '#ffffff',
-    marginTop: 10,
+    color: '#1C1B17',
     fontSize: 16,
+    fontWeight: '700',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FEF8E7',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: '800',
+    color: '#1C1B17',
   },
   addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4CAF50',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F5C451',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 6,
   },
   listContent: {
-    padding: 16,
+    padding: 24,
     paddingBottom: 20,
   },
   collectionCard: {
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    padding: 24,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 20,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOpacity: 0.06,
+    shadowRadius: 40,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   cardTopSection: {
     flexDirection: 'row',
@@ -1038,13 +1177,14 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   paymentMethodTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
   },
   paymentMethodText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   cardContent: {
     flexDirection: 'row',
@@ -1086,25 +1226,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   dateText: {
-    fontSize: 12,
-    color: '#ffffffff',
+    fontSize: 11,
+    color: '#1C1B17',
     marginTop: 7,
     textAlign: 'center',
-    backgroundColor:'#38368aff',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: '#d4d7e9ff',
+    backgroundColor:'#FEF8E7',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    fontWeight: '600',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   detailsContainer: {
     flex: 1,
@@ -1113,9 +1244,9 @@ const styles = StyleSheet.create({
     height: 120,
   },
   customerName: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#1F2937',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1C1B17',
     marginBottom: 8,
   },
   detailRow: {
@@ -1124,42 +1255,44 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   placeText: {
-    fontSize: 14,
-    color: '#5d28d8ff',
+    fontSize: 13,
+    color: '#7E7767',
     marginLeft: 6,
     flex: 1,
+    fontWeight: '500',
   },
   branchText: {
-    fontSize: 14,
-    color: '#b93942ff',
+    fontSize: 13,
+    color: '#7E7767',
     marginLeft: 6,
     flex: 1,
+    fontWeight: '500',
   },
   amountContainer: {
     marginTop: 8,
   },
   amountText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#059669',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
   },
   editButton: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#4CAF50',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#D4A574',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: '#D4A574',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     elevation: 5,
   },
   emptyContainer: {
@@ -1169,14 +1302,15 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyText: {
-    color: '#666666',
+    color: '#1C1B17',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     marginTop: 16,
   },
   emptySubText: {
-    color: '#999999',
+    color: '#7E7767',
     fontSize: 14,
+    fontWeight: '500',
     marginTop: 8,
     textAlign: 'center',
     paddingHorizontal: 40,

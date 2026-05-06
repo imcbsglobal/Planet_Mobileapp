@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
 import {
@@ -15,8 +15,9 @@ import {
 } from 'react-native';
 
 const ViewLateRequests = () => {
-  const router = useRouter();
-  const params = useLocalSearchParams(); 
+  const navigation = useNavigation();
+  const route = useRoute();
+  const params = route.params || {}; 
   
   // State management
   const [loadingTab, setLoadingTab] = useState(null);
@@ -73,7 +74,7 @@ const ViewLateRequests = () => {
             [
               {
                 text: 'OK',
-                onPress: () => router.replace('/login') // Navigate to login instead of back
+                onPress: () => navigation.replace('Login')
               }
             ]
           );
@@ -87,7 +88,7 @@ const ViewLateRequests = () => {
           [
             {
               text: 'OK',
-              onPress: () => router.replace('/login') // Navigate to login instead of back
+              onPress: () => navigation.replace('Login')
             }
           ]
         );
@@ -98,7 +99,7 @@ const ViewLateRequests = () => {
     };
 
     loadUserCredentials();
-  }, [params.userid, params.password, router]);
+  }, [params.userid, params.password]);
 
   // Fetch late requests from API with status filter
   const fetchLateRequests = async (showLoader = true, statusFilter = null) => {
@@ -286,6 +287,16 @@ const ViewLateRequests = () => {
     );
   };
 
+  // Get status config
+  const getStatusConfig = (status) => {
+    switch (status.toLowerCase()) {
+      case 'approved': return { bg: '#D1FAE5', text: '#065F46', dot: '#10B981' };
+      case 'rejected': return { bg: '#FEE2E2', text: '#991B1B', dot: '#EF4444' };
+      case 'pending':  return { bg: '#FEF8E7', text: '#92400E', dot: '#F5C451' };
+      default:         return { bg: '#F2F0E9', text: '#7E7767', dot: '#B5B0A4' };
+    }
+  };
+
   // Get status color
   const getStatusColor = (status) => {
     switch (status.toLowerCase()) {
@@ -305,7 +316,7 @@ const ViewLateRequests = () => {
     if (loadingTab) return;
     setLoadingTab(route);
     await new Promise((res) => setTimeout(res, 300));
-    router.push(`/${route}`);
+    navigation.navigate(route);
     setLoadingTab(null);
   };
 
@@ -360,7 +371,7 @@ const ViewLateRequests = () => {
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#F5C451" />
           <Text style={styles.loadingText}>Loading user credentials...</Text>
         </View>
       </View>
@@ -378,55 +389,64 @@ const ViewLateRequests = () => {
       {/* Loading Overlay */}
       {loadingTab && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color="#F5C451" />
           <Text style={styles.loadingOverlayTxt}>Loading…</Text>
         </View>
       )}
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={20} color="#1C1B17" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Late Requests</Text>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={24} color="#fff" />
+        <View>
+          <Text style={styles.pageLabelSmall}>RECORDS</Text>
+          <Text style={styles.pageTitle}>Late Requests</Text>
+        </View>
+        <TouchableOpacity style={styles.refreshIconButton} onPress={onRefresh}>
+          <Ionicons name="refresh" size={20} color="#D4A574" />
         </TouchableOpacity>
       </View>
 
-      {/* Filter Tabs with Counts */}
-      <View style={styles.filterContainer}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
+      {/* Hero Summary Banner */}
+      <View style={styles.heroBanner}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.heroLabel}>OVERVIEW</Text>
+          <Text style={styles.heroTitle}>
+            {lateRequests.length} Request{lateRequests.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+        <View style={styles.heroStats}>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#F5C451' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Pending')} Pending</Text>
+          </View>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#10B981' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Approved')} Approved</Text>
+          </View>
+          <View style={styles.heroStatItem}>
+            <View style={[styles.heroStatDot, { backgroundColor: '#EF4444' }]} />
+            <Text style={styles.heroStatText}>{getStatusCount('Rejected')} Rejected</Text>
+          </View>
+        </View>
+        <View style={styles.heroDecoration} />
+      </View>
+
+      {/* Filter Tabs */}
+      <View style={styles.filterRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
           {filterOptions.map((filter) => (
             <TouchableOpacity
               key={filter}
-              style={[
-                styles.filterTab,
-                activeFilter === filter && styles.activeFilterTab,
-              ]}
+              style={[styles.filterTab, activeFilter === filter && styles.filterTabActive]}
               onPress={() => handleFilterChange(filter)}
             >
-              <Text
-                style={[
-                  styles.filterTabText,
-                  activeFilter === filter && styles.activeFilterTabText,
-                ]}
-              >
+              <Text style={[styles.filterTabText, activeFilter === filter && styles.filterTabTextActive]}>
                 {filter}
               </Text>
-              {/* Show count badge */}
-              <View style={[
-                styles.countBadge,
-                activeFilter === filter && styles.activeCountBadge,
-              ]}>
-                <Text style={[
-                  styles.countText,
-                  activeFilter === filter && styles.activeCountText,
-                ]}>
+              <View style={[styles.filterBadge, activeFilter === filter && styles.filterBadgeActive]}>
+                <Text style={[styles.filterBadgeText, activeFilter === filter && styles.filterBadgeTextActive]}>
                   {getStatusCount(filter)}
                 </Text>
               </View>
@@ -435,102 +455,122 @@ const ViewLateRequests = () => {
         </ScrollView>
       </View>
 
-      {/* User Info Display */}
-      <View style={styles.userInfo}>
-        <Ionicons name="person" size={16} color="#fff" />
-        <Text style={styles.userInfoText}>
-          Logged in as: {userCredentials.userid}
-        </Text>
-      </View>
-
       {/* Content */}
       <ScrollView
         style={styles.content}
+        contentContainerStyle={styles.contentContainer}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#007AFF"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F5C451" />
         }
         showsVerticalScrollIndicator={false}
       >
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Loading late requests...</Text>
+          <View style={styles.centerState}>
+            <ActivityIndicator size="large" color="#F5C451" />
+            <Text style={styles.stateText}>Loading late requests...</Text>
           </View>
         ) : currentRequests.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="time-outline" size={64} color="#fff" />
-            <Text style={styles.emptyText}>No late requests found</Text>
-            <Text style={styles.emptySubText}>
-              {activeFilter === 'All' 
-                ? 'You haven\'t submitted any late requests yet.'
-                : `No ${activeFilter.toLowerCase()} late requests found.`
-              }
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="time-outline" size={32} color="#D4A574" />
+            </View>
+            <Text style={styles.emptyTitle}>No requests found</Text>
+            <Text style={styles.emptySubtext}>
+              {activeFilter === 'All'
+                ? "You haven't submitted any late requests yet."
+                : `No ${activeFilter.toLowerCase()} late requests found.`}
             </Text>
             <TouchableOpacity
-              style={styles.addRequestButton}
-              onPress={() => router.push('/late-request')}
+              style={styles.newRequestButton}
+              onPress={() => navigation.navigate('LateRequest')}
+              activeOpacity={0.85}
             >
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.addRequestButtonText}>Submit Late Request</Text>
+              <Ionicons name="add" size={18} color="#453714" />
+              <Text style={styles.newRequestButtonText}>New Late Request</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.requestsList}>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.headerCell, styles.dateColumn]}>Date</Text>
-              <Text style={[styles.headerCell, styles.reasonColumn]}>Reason</Text>
-              <Text style={[styles.headerCell, styles.statusColumn]}>Status</Text>
-              <Text style={[styles.headerCell, styles.timeColumn]}>Time In</Text>
-              <Text style={[styles.headerCell, styles.durationColumn]}>Late Duration</Text>
-            </View>
+          <>
+            {currentRequests.map((request, index) => {
+              const statusCfg = getStatusConfig(request.status);
+              return (
+                <View key={request.id || index} style={styles.requestCard}>
+                  {/* Card top row */}
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.cardDateWrap}>
+                      <View style={styles.cardIconWrap}>
+                        <Ionicons name="calendar-outline" size={16} color="#D4A574" />
+                      </View>
+                      <Text style={styles.cardDate}>{formatDate(request.date)}</Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
+                      <View style={[styles.statusDot, { backgroundColor: statusCfg.dot }]} />
+                      <Text style={[styles.statusText, { color: statusCfg.text }]}>
+                        {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
 
-            {/* Table Rows */}
-            {currentRequests.map((request, index) => (
-              <TouchableOpacity key={request.id || index} style={styles.tableRow}>
-                <Text style={[styles.cell, styles.dateColumn]}>
-                  {formatDate(request.date)}
-                </Text>
-                <Text 
-                  style={[styles.cell, styles.reasonColumn]} 
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
+                  {/* Time and Duration row */}
+                  <View style={styles.cardInfoRow}>
+                    <View style={styles.cardInfoItem}>
+                      <Text style={styles.cardInfoLabel}>TIME IN</Text>
+                      <Text style={styles.cardInfoValue}>{request.timeIn}</Text>
+                    </View>
+                    <View style={styles.cardInfoDivider} />
+                    <View style={styles.cardInfoItem}>
+                      <Text style={styles.cardInfoLabel}>LATE DURATION</Text>
+                      <Text style={styles.cardInfoValue}>{formatLateDuration(request.lateMinutes)}</Text>
+                    </View>
+                  </View>
+
+                  {/* Reason */}
+                  <View style={styles.cardReasonRow}>
+                    <Ionicons name="document-text-outline" size={14} color="#B5B0A4" />
+                    <Text style={styles.cardReason} numberOfLines={2}>{request.reason}</Text>
+                  </View>
+
+                  {/* Requested On */}
+                  <View style={styles.cardFooter}>
+                    <Ionicons name="time-outline" size={12} color="#B5B0A4" />
+                    <Text style={styles.cardFooterText}>Requested on {formatDate(request.requestedOn)}</Text>
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <View style={styles.pagination}>
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
                 >
-                  {request.reason}
-                </Text>
-                <View style={[styles.cell, styles.statusColumn]}>
-                  <View 
-                    style={[
-                      styles.statusBadge, 
-                      { backgroundColor: getStatusColor(request.status) }
-                    ]}
-                  >
-                    <Text style={styles.statusText}>
-                      {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[styles.cell, styles.timeColumn]}>
-                  {request.timeIn}
-                </Text>
-                <View style={[styles.cell, styles.durationColumn]}>
-                  <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>
-                      {formatLateDuration(request.lateMinutes)}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+                  <Ionicons name="chevron-back" size={16} color={currentPage === 1 ? '#B5B0A4' : '#1C1B17'} />
+                </TouchableOpacity>
+                <Text style={styles.pageText}>{currentPage} / {totalPages}</Text>
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <Ionicons name="chevron-forward" size={16} color={currentPage === totalPages ? '#B5B0A4' : '#1C1B17'} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
 
-     
+      {/* FAB */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => navigation.navigate('LateRequest')}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add" size={24} color="#453714" />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -538,113 +578,411 @@ const ViewLateRequests = () => {
 export default ViewLateRequests;
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
+  },
+  loadingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#6E6E6E',
+    fontWeight: '600',
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#15285cff',
+    backgroundColor: 'rgba(250, 249, 246, 0.92)',
     zIndex: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingOverlayTxt: { 
-    color: '#fff', 
-    marginTop: 8,
+  loadingOverlayTxt: {
+    color: '#1C1B17',
+    marginTop: 12,
     fontSize: 16,
+    fontWeight: '600',
   },
-  container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-  },
+
+  // Header
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    backgroundColor: '#1a1a2e',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
   backButton: {
-    padding: 5,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F2F0E9',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    flex: 1,
+  pageLabelSmall: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#7E7767',
+    letterSpacing: 1.4,
+    marginBottom: 2,
     textAlign: 'center',
   },
-  refreshButton: {
-    padding: 5,
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: -0.5,
+    textAlign: 'center',
   },
-  filterContainer: {
-    backgroundColor: '#f3f4f723',
-    paddingVertical: 0,
+  refreshIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  filterScrollContent: {
-    paddingHorizontal: 0,
+
+  // Hero Banner
+  heroBanner: {
+    backgroundColor: '#1C1B17',
+    borderRadius: 40,
+    padding: 32,
+    marginHorizontal: 24,
+    marginBottom: 16,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.08,
+    shadowRadius: 40,
+    elevation: 8,
+  },
+  heroLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F5C451',
+    letterSpacing: 3.2,
+    marginBottom: 6,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  heroStats: {
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  heroStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 90,
+  },
+  heroStatDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  heroStatText: {
+    fontSize: 13,
+    color: '#D1CEC4',
+    fontWeight: '600',
+  },
+  heroDecoration: {
+    position: 'absolute',
+    top: -40,
+    right: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(245, 196, 81, 0.05)',
+  },
+
+  // Filter Tabs
+  filterRow: {
+    paddingHorizontal: 24,
+    marginBottom: 12,
+  },
+  filterScroll: {
+    gap: 8,
+    paddingVertical: 4,
   },
   filterTab: {
-    flex: 1,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
-    minWidth: 100,
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 50,
+    backgroundColor: '#F2F0E9',
   },
-  activeFilterTab: {
-    borderBottomColor: '#007AFF',
+  filterTabActive: {
+    backgroundColor: '#1C1B17',
   },
   filterTabText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-    marginRight: 8,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7E7767',
   },
-  activeFilterTabText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
+  filterTabTextActive: {
+    color: '#FFFFFF',
   },
-  countBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 10,
+  filterBadge: {
     minWidth: 20,
     height: 20,
-    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#E5E0D4',
     justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  activeCountBadge: {
-    backgroundColor: '#007AFF',
-  },
-  countText: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  activeCountText: {
-    color: '#fff',
-  },
-  userInfo: {
-    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#f3f4f723',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 5,
   },
-  userInfoText: {
-    fontSize: 14,
-    color: '#fff',
-    marginLeft: 8,
-    fontStyle: 'italic',
+  filterBadgeActive: {
+    backgroundColor: '#F5C451',
   },
+  filterBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7E7767',
+  },
+  filterBadgeTextActive: {
+    color: '#453714',
+  },
+
+  // Content
   content: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 100,
+  },
+
+  // States
+  centerState: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    gap: 12,
+  },
+  stateText: {
+    fontSize: 15,
+    color: '#7E7767',
+    fontWeight: '500',
+  },
+  emptyState: {
+    paddingVertical: 60,
+    alignItems: 'center',
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1C1B17',
+    marginBottom: 6,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#7E7767',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  newRequestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F5C451',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 50,
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  newRequestButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#453714',
+  },
+
+  // Request Card
+  requestCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 24,
+    elevation: 4,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  cardDateWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardDate: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 50,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cardInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  cardInfoItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  cardInfoDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E5E0D4',
+    marginHorizontal: 8,
+  },
+  cardInfoLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#B5B0A4',
+    letterSpacing: 1.2,
+    marginBottom: 3,
+  },
+  cardInfoValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+  cardReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginBottom: 12,
+  },
+  cardReason: {
+    flex: 1,
+    fontSize: 13,
+    color: '#7E7767',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F2F0E9',
+  },
+  cardFooterText: {
+    fontSize: 11,
+    color: '#B5B0A4',
+    fontWeight: '500',
+  },
+
+  // Pagination
+  pagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    paddingVertical: 20,
+  },
+  pageButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  pageButtonDisabled: {
+    backgroundColor: '#F2F0E9',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  pageText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    bottom: 32,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F5C451',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
   },
   loadingContainer: {
     flex: 1,
@@ -652,122 +990,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 50,
   },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#fff',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 50,
-    paddingHorizontal: 20,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 15,
-    textAlign: 'center',
-  },
-  emptySubText: {
-    fontSize: 14,
-    color: '#fff',
-    marginTop: 5,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-  addRequestButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 10,
-  },
-  addRequestButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  requestsList: {
-    paddingBottom: 100,
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#f3f4f723',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  headerCell: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 15,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-    backgroundColor: '#f3f4f710',
-  },
-  cell: {
-    fontSize: 13,
-    color: '#fff',
-    textAlign: 'center',
-    alignSelf: 'center',
-  },
-  dateColumn: {
-    flex: 1.2,
-  },
-  reasonColumn: {
-    flex: 1.8,
-  },
-  statusColumn: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  timeColumn: {
-    flex: 1,
-  },
-  durationColumn: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  durationBadge: {
-    backgroundColor: 'rgba(255, 165, 0, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 165, 0, 0.5)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  durationText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#FFA500',
-  },
-  
 });

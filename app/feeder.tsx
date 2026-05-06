@@ -1,205 +1,122 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import React, { useState } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Easing,
+    ActivityIndicator,
+    ScrollView,
     StyleSheet,
     Text,
-    TouchableOpacity,
-    View
+    View,
+    Animated,
+    Pressable,
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
+interface FeederOption {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  route: string;
+}
 
 export default function Feeder() {
-  const router = useRouter();
-  
-  // Animation values
-  const spinValue = new Animated.Value(0);
-  const pulseValue = new Animated.Value(1);
-  const floatValue = new Animated.Value(0);
+  const navigation = useNavigation();
+  const [loadingTab, setLoadingTab] = useState<string | null>(null);
 
-  // Spin animation
-  React.useEffect(() => {
-    const spinAnimation = Animated.loop(
-      Animated.timing(spinValue, {
-        toValue: 1,
-        duration: 3000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
+  const feederOptions: FeederOption[] = [
+    {
+      id: '1',
+      title: 'Add Feeder',
+      description: 'Add new feeder entry',
+      icon: 'add-circle-outline',
+      route: 'add-feeder',
+    }
+  ];
 
-    // Pulse animation
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseValue, {
-          toValue: 1.1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseValue, {
-          toValue: 1,
-          duration: 1000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    // Float animation
-    const floatAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(floatValue, {
-          toValue: 1,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(floatValue, {
-          toValue: 0,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    spinAnimation.start();
-    pulseAnimation.start();
-    floatAnimation.start();
-
-    return () => {
-      spinAnimation.stop();
-      pulseAnimation.stop();
-      floatAnimation.stop();
+  const handleOptionPress = async (route: string) => {
+    if (loadingTab) return;
+    setLoadingTab(route);
+    await new Promise((res) => setTimeout(res, 300));
+    
+    const routeMap: { [key: string]: string } = {
+      'add-feeder': 'AddFeeder',
     };
-  }, []);
-
-  // Interpolate animations - FIXED: rotation values must be strings
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'], // Must be strings with 'deg'
-  });
-
-  const pulse = pulseValue;
-  
-  const float = floatValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -10],
-  });
+    
+    navigation.navigate(routeMap[route] || route);
+    setLoadingTab(null);
+  };
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {loadingTab && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#D4A574" />
+        </View>
+      )}
+
       <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Feeder Management</Text>
-        <View style={styles.headerPlaceholder} />
+        <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Feeder</Text>
+        <View style={{ width: 44 }} />
       </View>
 
-      {/* Main Content */}
-      <View style={styles.content}>
-        {/* Animated Construction Icon */}
-        <Animated.View 
-          style={[
-            styles.iconContainer,
-            { 
-              transform: [
-                { translateY: float },
-                { scale: pulse }
-              ] 
-            }
-          ]}
-        >
-          <Ionicons name="construct" size={80} color="#FF9800" />
-        </Animated.View>
-
-        {/* Spinning Gears */}
-        <View style={styles.gearsContainer}>
-          <Animated.View 
-            style={[
-              styles.gear,
-              { transform: [{ rotate: spin }] }
-            ]}
-          >
-            <Ionicons name="cog" size={40} color="#666" />
-          </Animated.View>
-          
-          <Animated.View 
-            style={[
-              styles.gear,
-              styles.gearSmall,
-              { 
-                transform: [
-                  { rotate: spin },
-                  { scale: 0.7 }
-                ] 
-              }
-            ]}
-          >
-            <Ionicons name="cog" size={30} color="#888" />
-          </Animated.View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.titleSection}>
+          <Text style={styles.pageTitle}>Feeder Management</Text>
+          <Text style={styles.pageSubtitle}>
+            Add and manage your feeder entries
+          </Text>
         </View>
 
-        {/* Work in Progress Text */}
-        <Animated.View 
-          style={[
-            styles.textContainer,
-            { transform: [{ scale: pulse }] }
-          ]}
-        >
-          <Text style={styles.title}>Work in Progress</Text>
-          <Text style={styles.subtitle}>
-            We're building something amazing for feeder management!
-          </Text>
-          <Text style={styles.description}>
-            This feature is currently under development. 
-            We're working hard to bring you the best feeder 
-            management experience.
-          </Text>
-        </Animated.View>
-
-        {/* Progress Bar Animation */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBackground}>
-            <Animated.View 
-              style={[
-                styles.progressBar,
-                { 
-                  transform: [
-                    { 
-                      translateX: floatValue.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-100, width - 100],
-                      }) 
-                    }
-                  ] 
-                }
-              ]} 
-            />
-          </View>
-          <Text style={styles.progressText}>Development in progress...</Text>
+        <View style={styles.optionsContainer}>
+          {feederOptions.map((option) => {
+            const scaleAnim = new Animated.Value(1);
+            
+            const handlePressIn = () => {
+              Animated.timing(scaleAnim, {
+                toValue: 0.97,
+                duration: 150,
+                useNativeDriver: true,
+              }).start();
+            };
+            
+            const handlePressOut = () => {
+              Animated.timing(scaleAnim, {
+                toValue: 1,
+                duration: 150,
+                useNativeDriver: true,
+              }).start();
+            };
+            
+            return (
+              <Pressable
+                key={option.id}
+                style={styles.optionWrapper}
+                onPress={() => handleOptionPress(option.route)}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+              >
+                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                  <View style={styles.optionItem}>
+                    <View style={styles.optionIconContainer}>
+                      <Ionicons name={option.icon as any} size={48} color="#D4A574" />
+                    </View>
+                    <Text style={styles.optionItemTitle}>{option.title}</Text>
+                    <Text style={styles.optionItemDescription}>{option.description}</Text>
+                  </View>
+                </Animated.View>
+              </Pressable>
+            );
+          })}
         </View>
-
-        {/* Back to Home Button */}
-        <TouchableOpacity 
-          style={styles.homeButton}
-          onPress={() => router.push('/')}
-        >
-          <Ionicons name="home" size={20} color="#fff" style={styles.homeIcon} />
-          <Text style={styles.homeButtonText}>Back to Home</Text>
-        </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -207,117 +124,109 @@ export default function Feeder() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#FAF9F6',
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    zIndex: 999,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(250, 249, 246, 0.8)',
   },
   backButton: {
-    padding: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1B17',
   },
-  headerPlaceholder: {
-    width: 40,
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 30,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 30,
-  },
-  iconContainer: {
-    marginBottom: 30,
-    alignItems: 'center',
-  },
-  gearsContainer: {
-    position: 'relative',
-    marginBottom: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gear: {
-    position: 'absolute',
-  },
-  gearSmall: {
-    top: -20,
-    right: -30,
-  },
-  textContainer: {
+  titleSection: {
     alignItems: 'center',
     marginBottom: 40,
+    paddingVertical: 20,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
+  pageTitle: {
+    fontSize: 28,
+    color: '#1C1B17',
+    fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 18,
-    color: '#00ddff',
+  pageSubtitle: {
+    fontSize: 16,
+    color: '#7E7767',
     textAlign: 'center',
-    marginBottom: 15,
+    lineHeight: 22,
     fontWeight: '500',
   },
-  description: {
-    fontSize: 14,
-    color: '#ccc',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  progressContainer: {
-    width: '100%',
-    marginBottom: 40,
-    alignItems: 'center',
-  },
-  progressBackground: {
-    width: '100%',
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressBar: {
-    width: 100,
-    height: 6,
-    backgroundColor: '#00ddff',
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  homeButton: {
-    flexDirection: 'row',
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
+  optionsContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 160,
   },
-  homeIcon: {
-    marginRight: 8,
+  optionWrapper: {
+    width: '100%',
+    maxWidth: 400,
+    marginBottom: 20,
   },
-  homeButtonText: {
-    color: '#fff',
+  optionItem: {
+    borderRadius: 32,
+    padding: 40,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.06,
+    shadowRadius: 40,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  optionIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    backgroundColor: '#FEF8E7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  optionItemTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1C1B17',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  optionItemDescription: {
     fontSize: 16,
-    fontWeight: 'bold',
+    color: '#7E7767',
+    textAlign: 'center',
+    lineHeight: 22,
+    fontWeight: '500',
   },
 });

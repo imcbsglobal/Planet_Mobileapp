@@ -2,13 +2,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -73,6 +76,33 @@ interface TodayStatus {
 
 const Punch = () => {
   const router = useRouter();
+
+  // Animation refs
+  const punchInScale = useRef(new Animated.Value(1)).current;
+  const punchOutScale = useRef(new Animated.Value(1)).current;
+  const breakInScale = useRef(new Animated.Value(1)).current;
+  const breakOutScale = useRef(new Animated.Value(1)).current;
+  const punchInPulse = useRef(new Animated.Value(1)).current;
+  const punchOutPulse = useRef(new Animated.Value(1)).current;
+  const punchInPulseOpacity = useRef(new Animated.Value(0)).current;
+  const punchOutPulseOpacity = useRef(new Animated.Value(0)).current;
+
+  const animatePress = (scaleRef: Animated.Value, pulseRef: Animated.Value, pulseOpacity: Animated.Value) => {
+    // Scale bounce
+    Animated.sequence([
+      Animated.spring(scaleRef, { toValue: 0.88, useNativeDriver: true, speed: 50, bounciness: 0 }),
+      Animated.spring(scaleRef, { toValue: 1.08, useNativeDriver: true, speed: 20, bounciness: 12 }),
+      Animated.spring(scaleRef, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }),
+    ]).start();
+    // Pulse ring
+    pulseRef.setValue(1);
+    pulseOpacity.setValue(0.6);
+    Animated.parallel([
+      Animated.timing(pulseRef, { toValue: 2.2, duration: 600, useNativeDriver: true }),
+      Animated.timing(pulseOpacity, { toValue: 0, duration: 600, useNativeDriver: true }),
+    ]).start();
+  };
+
   const [isLoading, setIsLoading] = useState(false);
   const [isBreakLoading, setIsBreakLoading] = useState(false);
   const [todayStatus, setTodayStatus] = useState<TodayStatus | null>(null);
@@ -474,6 +504,11 @@ const Punch = () => {
   // Updated handlePunch with confirmation dialog
   const handlePunch = async (type: 'in' | 'out') => {
     if (!userCredentials || !currentLocation) return;
+
+    // Haptic + animation
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    if (type === 'in') animatePress(punchInScale, punchInPulse, punchInPulseOpacity);
+    else animatePress(punchOutScale, punchOutPulse, punchOutPulseOpacity);
     
     // Show confirmation dialog
     const confirmationTitle = type === 'in' ? 'Punch In Confirmation' : 'Punch Out Confirmation';
@@ -556,6 +591,9 @@ const Punch = () => {
       
       // Save punch data locally
       await savePunchData(type, payload);
+      
+      // 🔔 Trigger success notification
+      await triggerSuccessNotification(type);
       
       Alert.alert('Success', `Punch ${type === 'in' ? 'In' : 'Out'} successful!`);
       
@@ -944,11 +982,16 @@ const Punch = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <LinearGradient
+      colors={['#FFF8E7', '#FFE5B4', '#FFD89B']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.container}
+    >
       {/* ---------- loading overlay ---------- */}
       {loadingTab && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color="#F4C84A" />
           <Text style={styles.loadingOverlayTxt}>Loading…</Text>
         </View>
       )}
@@ -956,22 +999,21 @@ const Punch = () => {
       {/* Back Icon */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#1C1C1C" />
         </TouchableOpacity>
+        <Text style={styles.pageTitle}>ATTENDANCE</Text>
+        <View style={{ width: 24 }} />
       </View>
-
-      {/* Center Title */}
-      <Text style={styles.pageTitle}>ATTENDANCE</Text>
 
       <ScrollView
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F4C84A" />
         }
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
       >
         {/* Today's Status Card */}
-        <BlurView intensity={90} tint="light" style={styles.todayStatusCard}>
+        <View style={styles.todayStatusCard}>
           <View style={styles.transparentCardContent}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Today's Status</Text>
@@ -1046,150 +1088,114 @@ const Punch = () => {
               </View>
             </View>
           </View>
-        </BlurView>
+        </View>
 
         {/* Main Attendance Punch */}
         <View style={styles.card}>
+          <Text style={styles.cardHeading}>DAILY PUNCH</Text>
           <View style={styles.mainButtonRow}>
-            <TouchableOpacity
-              style={[
-                styles.mainBtn, 
-                styles.mainInBtn,
-                isPunchedIn() && styles.disabledMainBtn
-              ]}
-              onPress={() => handlePunch('in')}
-              disabled={isLoading || isBreakLoading || isPunchedIn()}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons 
-                    name="log-in-outline" 
-                    size={20} 
-                    color={isPunchedIn() ? "#999" : "#fff"} 
-                  />
-                  <Text style={[
-                    styles.btnText,
-                    isPunchedIn() && styles.disabledBtnText
-                  ]}>
-                    Punch In
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.mainBtn, 
-                styles.mainOutBtn,
-                (!isPunchedIn() || isPunchedOut()) && styles.disabledMainBtn
-              ]}
-              onPress={() => handlePunch('out')}
-              disabled={isLoading || isBreakLoading || !isPunchedIn() || isPunchedOut()}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons 
-                    name="log-out-outline" 
-                    size={20} 
-                    color={(!isPunchedIn() || isPunchedOut()) ? "#999" : "#fff"} 
-                  />
-                  <Text style={[
-                    styles.btnText,
-                    (!isPunchedIn() || isPunchedOut()) && styles.disabledBtnText
-                  ]}>
-                    Punch Out
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {/* Punch In */}
+            <View style={styles.btnWrapper}>
+              <Animated.View style={[styles.pulseRing, { backgroundColor: '#4CAF50', transform: [{ scale: punchInPulse }], opacity: punchInPulseOpacity }]} />
+              <Animated.View style={{ transform: [{ scale: punchInScale }] }}>
+                <TouchableOpacity
+                  style={[styles.mainBtn, styles.mainInBtn, isPunchedIn() && styles.disabledMainBtn]}
+                  onPress={() => handlePunch('in')}
+                  disabled={isLoading || isBreakLoading || isPunchedIn()}
+                  activeOpacity={0.85}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color="#fff" size="large" />
+                  ) : (
+                    <>
+                      <Ionicons name="finger-print" size={40} color={isPunchedIn() ? '#999' : '#fff'} />
+                      <Text style={[styles.btnText, isPunchedIn() && styles.disabledBtnText]}>Punch In</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+            {/* Punch Out */}
+            <View style={styles.btnWrapper}>
+              <Animated.View style={[styles.pulseRing, { backgroundColor: '#F44336', transform: [{ scale: punchOutPulse }], opacity: punchOutPulseOpacity }]} />
+              <Animated.View style={{ transform: [{ scale: punchOutScale }] }}>
+                <TouchableOpacity
+                  style={[styles.mainBtn, styles.mainOutBtn, (!isPunchedIn() || isPunchedOut()) && styles.disabledMainBtn]}
+                  onPress={() => handlePunch('out')}
+                  disabled={isLoading || isBreakLoading || !isPunchedIn() || isPunchedOut()}
+                  activeOpacity={0.85}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color="#fff" size="large" />
+                  ) : (
+                    <>
+                      <Ionicons name="finger-print" size={40} color={(!isPunchedIn() || isPunchedOut()) ? '#999' : '#fff'} />
+                      <Text style={[styles.btnText, (!isPunchedIn() || isPunchedOut()) && styles.disabledBtnText]}>Punch Out</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
           </View>
         </View>
 
-        {/* Break Punch Card - FIXED Logic */}
+        {/* Break Punch Card */}
         <View style={styles.breakCard}>
-          <Text style={styles.breakHeading}>BREAK PUNCH TIME</Text>
-          
-          {/* UPDATED Break Time Row to show proper times */}
-          <View style={styles.timeRow}>
-            <Text style={styles.timeLabel}>
-              In: {(() => {
-                // Check for break times from the API data
-                if (breakStatus?.breaks_today?.length > 0) {
-                  const activeBreak = breakStatus.breaks_today.find((b: any) => b.is_active);
-                  if (activeBreak?.punch_in) {
-                    return formatTime(activeBreak.punch_in);
-                  }
-                }
-                
-                // Fallback to current break data
-                const breakInTime = breakStatus?.break_punch_in || breakStatus?.current_break_in;
-                return breakInTime ? formatTime(breakInTime) : 'Not started';
-              })()}
-            </Text>
-            <Text style={styles.timeLabel}>
-              Out: {(() => {
-                // Check for break times from the API data
-                if (breakStatus?.breaks_today?.length > 0) {
-                  const activeBreak = breakStatus.breaks_today.find((b: any) => b.is_active);
-                  if (activeBreak?.punch_out) {
-                    return formatTime(activeBreak.punch_out);
-                  }
-                  if (activeBreak?.is_active) {
-                    return 'In progress...';
-                  }
-                }
-                
-                // Fallback to current break data
-                if (breakStatus?.break_punch_out) {
-                  return formatTime(breakStatus.break_punch_out);
-                }
-                
-                return isBreakInProgress() ? 'In progress...' : 'Not started';
-              })()}
-            </Text>
-          </View>
+          <Text style={styles.cardHeading}>BREAK PUNCH </Text>
           
           <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={[
-                styles.btn,
-                styles.inBtn,
-                (isBreakInProgress() || !canStartBreak()) && styles.disabledBtn,
-              ]}
-              onPress={() => handleBreakPunch('in')}
-              disabled={isBreakLoading || isBreakInProgress() || !canStartBreak()}
-            >
-              {isBreakLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="log-in-outline" size={20} color="#fff" />
-                  <Text style={styles.btnText}>Break In</Text>
-                </>
-              )}
-            </TouchableOpacity>
-            <View style={styles.buttonSeparator} />
-            <TouchableOpacity
-              style={[
-                styles.btn,
-                styles.outBtn,
-                !isBreakInProgress() && styles.disabledBtn,
-              ]}
-              onPress={() => handleBreakPunch('out')}
-              disabled={isBreakLoading || !isBreakInProgress()}
-            >
-              {isBreakLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="log-out-outline" size={20} color="#fff" />
-                  <Text style={styles.btnText}>Break Out</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {/* Break In */}
+            <View style={styles.btnWrapper}>
+              <Animated.View style={{ transform: [{ scale: breakInScale }] }}>
+                <TouchableOpacity
+                  style={[styles.breakBtn, styles.inBtn, (isBreakInProgress() || !canStartBreak()) && styles.disabledBtn]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    Animated.sequence([
+                      Animated.spring(breakInScale, { toValue: 0.88, useNativeDriver: true, speed: 50, bounciness: 0 }),
+                      Animated.spring(breakInScale, { toValue: 1.06, useNativeDriver: true, speed: 20, bounciness: 10 }),
+                      Animated.spring(breakInScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }),
+                    ]).start();
+                    handleBreakPunch('in');
+                  }}
+                  disabled={isBreakLoading || isBreakInProgress() || !canStartBreak()}
+                  activeOpacity={0.85}
+                >
+                  {isBreakLoading ? <ActivityIndicator color="#fff" size="large" /> : (
+                    <>
+                      <Ionicons name="finger-print" size={40} color="#fff" />
+                      <Text style={styles.btnText}>Break In</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+            {/* Break Out */}
+            <View style={styles.btnWrapper}>
+              <Animated.View style={{ transform: [{ scale: breakOutScale }] }}>
+                <TouchableOpacity
+                  style={[styles.breakBtn, styles.outBtn, !isBreakInProgress() && styles.disabledBtn]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    Animated.sequence([
+                      Animated.spring(breakOutScale, { toValue: 0.88, useNativeDriver: true, speed: 50, bounciness: 0 }),
+                      Animated.spring(breakOutScale, { toValue: 1.06, useNativeDriver: true, speed: 20, bounciness: 10 }),
+                      Animated.spring(breakOutScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }),
+                    ]).start();
+                    handleBreakPunch('out');
+                  }}
+                  disabled={isBreakLoading || !isBreakInProgress()}
+                  activeOpacity={0.85}
+                >
+                  {isBreakLoading ? <ActivityIndicator color="#fff" size="large" /> : (
+                    <>
+                      <Ionicons name="finger-print" size={40} color="#fff" />
+                      <Text style={styles.btnText}>Break Out</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
           </View>
           <Text style={styles.breakStatus}>{getBreakStatusText()}</Text>
           {!canStartBreak() && (
@@ -1211,7 +1217,7 @@ const Punch = () => {
             <Ionicons
               name={showBreakHistory ? 'chevron-up' : 'chevron-down'}
               size={16}
-              color="#007bff"
+              color="#87847b"
             />
           </TouchableOpacity>
           
@@ -1260,39 +1266,35 @@ const Punch = () => {
           )}
         </View>
       </ScrollView>
-
-      
-    </View>
+    </LinearGradient>
   );
 };
 
 const styles = StyleSheet.create({
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     zIndex: 999,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingOverlayTxt: { color: '#fff', marginTop: 8 },
+  loadingOverlayTxt: { color: '#2C2416', marginTop: 10, fontWeight: '600', fontSize: 15 },
   container: {
     flex: 1,
-    backgroundColor: '#1a1a2e',
-    paddingTop: 50,
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 24,
   },
   pageTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 20,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#2C2416',
+    letterSpacing: 0.5,
   },
   scrollContainer: {
     paddingBottom: 150,
@@ -1300,242 +1302,329 @@ const styles = StyleSheet.create({
   // Today's Status Card Styles
   todayStatusCard: {
     margin: 20,
-    borderRadius: 20,
+    marginTop: 0,
+    borderRadius: 24,
     overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    elevation: 12,
+    shadowColor: '#D4A574',
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   transparentCardContent: {
-    paddingVertical: 25,
-    paddingHorizontal: 25,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 20,
+    paddingVertical: 24,
+    paddingHorizontal: 24,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 14,
   },
-  cardTitle: { fontSize: 22, fontWeight: 'bold', color: '#1a1a1a' },
+  cardTitle: { fontSize: 19, fontWeight: '800', color: '#2C2416', letterSpacing: 0.3 },
   statusIndicator: { padding: 4 },
-  dateText: { fontSize: 14, color: '#666', marginBottom: 20, fontWeight: '500' },
+  dateText: { fontSize: 14, color: '#8B7355', marginBottom: 22, fontWeight: '600', letterSpacing: 0.2 },
   statusContainer: {
-    backgroundColor: 'rgba(248, 250, 252, 0.8)',
-    borderRadius: 16,
+    backgroundColor: 'rgba(255, 248, 231, 0.6)',
+    borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(226, 232, 240, 0.8)',
+    borderColor: 'rgba(212, 165, 116, 0.2)',
   },
   statusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    minHeight: 32,
+    paddingVertical: 11,
+    minHeight: 38,
   },
   statusLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  statusLabel: { fontSize: 14, color: '#374151', fontWeight: '500', marginLeft: 8 },
-  statusValue: { fontSize: 14, color: '#1f2937', fontWeight: '600', textAlign: 'right', flex: 1 },
-  locationValue: { fontSize: 12, color: '#6b7280', textDecorationLine: 'underline' },
-  divider: { height: 1, backgroundColor: 'rgba(229, 231, 235, 0.8)', marginVertical: 12 },
+  statusLabel: { fontSize: 14, color: '#6B5744', fontWeight: '700', marginLeft: 10, letterSpacing: 0.1 },
+  statusValue: { fontSize: 15, color: '#2C2416', fontWeight: '800', textAlign: 'right', flex: 1 },
+  locationValue: { fontSize: 13, color: '#8B7355', fontWeight: '600' },
+  divider: { height: 1, backgroundColor: 'rgba(212, 165, 116, 0.25)', marginVertical: 14 },
   workingStatusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 15,
-    paddingTop: 15,
+    marginTop: 18,
+    paddingTop: 18,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(229, 231, 235, 0.6)',
+    borderTopColor: 'rgba(212, 165, 116, 0.25)',
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  workingStatus: { fontSize: 14, fontWeight: '600' },
+  statusDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  workingStatus: { fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
   
   // Main Punch Card Styles
   card: {
-    backgroundColor: '#f5f0f0ff',
     margin: 20,
-    borderRadius: 15,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    borderRadius: 24,
+    padding: 28,
+    shadowColor: '#D4A574',
+    shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowRadius: 20,
+    elevation: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    alignItems: 'center',
+  },
+  cardHeading: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#2C2416',
+    textAlign: 'center',
+    marginBottom: 24,
+    letterSpacing: 0.8,
   },
   mainButtonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 36,
+    width: '100%',
   },
-  mainBtn: {
-    flex: 1,
-    flexDirection: 'row',
+  btnWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 15,
-    borderRadius: 10,
-    gap: 8,
   },
-  mainInBtn: { backgroundColor: '#4CAF50' },
-  mainOutBtn: { backgroundColor: '#f44336' },
+  pulseRing: {
+    position: 'absolute',
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+  },
+  mainBtn: {
+    width: 130,
+    height: 130,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 65,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  mainInBtn: { 
+    backgroundColor: '#10B981',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  mainOutBtn: { 
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
   disabledMainBtn: { 
-    backgroundColor: '#ccc', 
-    opacity: 0.6 
+    backgroundColor: 'rgba(200, 200, 200, 0.5)', 
+    opacity: 0.6,
+    shadowOpacity: 0.08,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   disabledBtnText: { 
-    color: '#999' 
+    color: '#A0A0A0' 
+  },
+  btnText: { 
+    color: '#fff', 
+    fontSize: 15, 
+    fontWeight: '800',
+    marginTop: 6,
+    letterSpacing: 0.5,
   },
   
   // Break Card Styles
   breakCard: {
-    backgroundColor: '#f4f0f0ff',
     margin: 20,
-    borderRadius: 15,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    marginTop: 0,
+    borderRadius: 24,
+    padding: 28,
+    shadowColor: '#D4A574',
+    shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowRadius: 20,
+    elevation: 12,
     marginBottom: 20,
-  },
-  breakHeading: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000',
-    textAlign: 'center',
-    marginBottom: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    alignItems: 'center',
   },
   timeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
+    justifyContent: 'space-around',
+    marginBottom: 26,
+    backgroundColor: 'rgba(255, 248, 231, 0.7)',
+    padding: 18,
+    borderRadius: 18,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 165, 116, 0.2)',
   },
-  timeLabel: { color: '#333', fontSize: 14, fontWeight: '500' },
+  timeLabel: { color: '#2C2416', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   buttonRow: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 18,
+    gap: 36,
+    width: '100%',
   },
-  btn: {
-    flex: 1,
-    flexDirection: 'row',
+  breakBtn: {
+    width: 130,
+    height: 130,
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    gap: 6,
+    borderRadius: 65,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
   },
-  inBtn: { backgroundColor: '#4CAF50' },
-  outBtn: { backgroundColor: '#f44336' },
-  disabledBtn: { backgroundColor: '#ccc', opacity: 0.6 },
-  buttonSeparator: { width: 15 },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  inBtn: { 
+    backgroundColor: '#10B981',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  outBtn: { 
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  disabledBtn: { 
+    backgroundColor: 'rgba(200, 200, 200, 0.5)', 
+    opacity: 0.6, 
+    shadowOpacity: 0.08,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
   breakStatus: {
     textAlign: 'center',
-    color: '#666',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginBottom: 5,
+    color: '#6B5744',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 10,
+    padding: 14,
+    borderRadius: 14,
+    letterSpacing: 0.2,
   },
   breakId: {
     textAlign: 'center',
-    color: '#999',
-    fontSize: 10,
+    color: '#A0A0A0',
+    fontSize: 11,
     fontStyle: 'italic',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   historyToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    marginTop: 10,
+    borderTopColor: 'rgba(212, 165, 116, 0.2)',
+    marginTop: 18,
   },
-  historyToggleText: { color: '#007bff', fontSize: 14, fontWeight: '500', marginRight: 5 },
+  historyToggleText: { color: '#8B7355', fontSize: 15, fontWeight: '700', marginRight: 6, letterSpacing: 0.2 },
   historyContainer: {
-    marginTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingTop: 15,
+    marginTop: 18,
+    paddingTop: 18,
   },
   historyTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#2C2416',
     textAlign: 'center',
-    marginBottom: 15,
+    marginBottom: 18,
+    letterSpacing: 0.3,
   },
   noHistoryText: {
     textAlign: 'center',
-    color: '#888',
-    fontSize: 12,
+    color: '#8B7355',
+    fontSize: 14,
     fontStyle: 'italic',
-    paddingVertical: 20,
+    paddingVertical: 22,
   },
   historyItem: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    borderLeftWidth: 4,
-    borderLeftColor: '#007bff',
+    backgroundColor: 'rgba(255, 248, 231, 0.8)',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
+    borderLeftWidth: 5,
+    borderLeftColor: '#F4C84A',
+    shadowColor: '#D4A574',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 165, 116, 0.2)',
   },
   historyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 14,
   },
-  historyBreakId: { fontSize: 14, fontWeight: 'bold', color: '#333' },
-  historyDate: { fontSize: 12, color: '#666' },
+  historyBreakId: { fontSize: 16, fontWeight: '800', color: '#2C2416', letterSpacing: 0.2 },
+  historyDate: { fontSize: 13, color: '#8B7355', fontWeight: '600' },
   historyTimes: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 165, 116, 0.15)',
   },
-  historyTime: { fontSize: 12, color: '#333' },
-  historyLabel: { fontWeight: 'bold', color: '#555' },
+  historyTime: { fontSize: 14, color: '#2C2416', fontWeight: '600' },
+  historyLabel: { fontWeight: '800', color: '#6B5744' },
   historyDuration: {
-    fontSize: 12,
-    color: '#007bff',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#D4A574',
+    fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+    backgroundColor: 'rgba(244, 200, 74, 0.2)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    letterSpacing: 0.3,
   },
   historyStatus: { alignItems: 'center' },
   historyStatusText: {
-    fontSize: 11,
-    fontWeight: '500',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    fontSize: 12,
+    fontWeight: '800',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 14,
     textAlign: 'center',
-    minWidth: 80,
+    minWidth: 90,
+    letterSpacing: 0.3,
   },
-  completedStatus: { backgroundColor: '#d4edda', color: '#155724' },
-  activeStatus: { backgroundColor: '#fff3cd', color: '#856404' },
+  completedStatus: { backgroundColor: '#D1FAE5', color: '#065F46', borderWidth: 1, borderColor: '#10B981' },
+  activeStatus: { backgroundColor: '#FEF3C7', color: '#92400E', borderWidth: 1, borderColor: '#F59E0B' },
   breakWarning: {
     textAlign: 'center',
-    color: '#dc3545',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 5,
-    paddingHorizontal: 10,
-    backgroundColor: 'rgba(220, 53, 69, 0.1)',
-    paddingVertical: 8,
-    borderRadius: 6,
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 10,
+    paddingHorizontal: 18,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    paddingVertical: 14,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(220, 53, 69, 0.2)',
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+    letterSpacing: 0.2,
   }, 
   
 

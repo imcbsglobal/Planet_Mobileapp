@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMC API Tester</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1C1B17 0%, #3a3834 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .form-section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+        }
+
+        .form-section h2 {
+            color: #1C1B17;
+            margin-bottom: 20px;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #495057;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .response-section {
+            margin-top: 25px;
+        }
+
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .response-header h3 {
+            color: #1C1B17;
+            font-size: 18px;
+        }
+
+        .status-badge {
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .response-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .response-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .response-box::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 10px;
+        }
+
+        .response-box::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 10px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card h4 {
+            color: #6c757d;
+            font-size: 12px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .stat-card p {
+            color: #1C1B17;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .copy-btn {
+            padding: 8px 15px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 IMC API Tester</h1>
+            <p>Test and debug your collection APIs</p>
+        </div>
+
+        <div class="content">
+            <!-- Credentials Section -->
+            <div class="form-section">
+                <h2>🔐 Authentication</h2>
+                <div class="form-group">
+                    <label for="userId">User ID</label>
+                    <input type="text" id="userId" placeholder="Enter your user ID">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter your password">
+                </div>
+            </div>
+
+            <!-- API Selection Section -->
+            <div class="form-section">
+                <h2>📡 API Endpoint</h2>
+                <div class="form-group">
+                    <label for="apiEndpoint">Select API</label>
+                    <select id="apiEndpoint">
+                        <option value="/collections/">GET /collections/ - Load Collections</option>
+                        <option value="/clients">GET /clients - Load Customers</option>
+                        <option value="/departments">GET /departments - Load Branches</option>
+                    </select>
+                </div>
+                <div class="button-group">
+                    <button class="btn-primary" onclick="testAPI()">
+                        <span id="btnText">🚀 Test API</span>
+                        <span id="btnLoading" class="loading hidden"></span>
+                    </button>
+                    <button class="btn-secondary" onclick="clearResponse()">🗑️ Clear</button>
+                </div>
+            </div>
+
+            <!-- Response Section -->
+            <div class="response-section">
+                <div class="response-header">
+                    <h3>📋 Response</h3>
+                    <div>
+                        <span id="statusBadge" class="status-badge hidden"></span>
+                        <button class="btn-success copy-btn" onclick="copyResponse()" id="copyBtn" style="display: none; margin-left: 10px;">
+                            📋 Copy
+                        </button>
+                    </div>
+                </div>
+                <div class="response-box" id="responseBox">
+                    <span style="color: #808080;">Response will appear here...</span>
+                </div>
+
+                <!-- Stats Section -->
+                <div class="stats" id="statsSection" style="display: none;">
+                    <div class="stat-card">
+                        <h4>Status Code</h4>
+                        <p id="statusCode">-</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Response Time</h4>
+                        <p id="responseTime">-</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Data Count</h4>
+                        <p id="dataCount">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://myimc.in/app4/api';
+
+        async function testAPI() {
+            const userId = document.getElementById('userId').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const endpoint = document.getElementById('apiEndpoint').value;
+
+            // Validation
+            if (!userId || !password) {
+                alert('⚠️ Please enter both User ID and Password');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('btnText').textContent = 'Testing...';
+            document.getElementById('btnLoading').classList.remove('hidden');
+            document.getElementById('statusBadge').className = 'status-badge status-loading';
+            document.getElementById('statusBadge').textContent = 'Loading...';
+            document.getElementById('statusBadge').classList.remove('hidden');
+
+            const startTime = Date.now();
+
+            try {
+                // Create Basic Auth header
+                const authString = btoa(`${userId}:${password}`);
+                
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Basic ${authString}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    mode: 'cors', // Enable CORS
+                    credentials: 'omit' // Don't send cookies to avoid CORS issues
+                });
+
+                const endTime = Date.now();
+                const responseTime = endTime - startTime;
+
+                // Get response text first
+                const responseText = await response.text();
+                
+                // Try to parse as JSON
+                let responseData;
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+
+                // Display response
+                document.getElementById('responseBox').textContent = JSON.stringify(responseData, null, 2);
+                document.getElementById('copyBtn').style.display = 'inline-flex';
+
+                // Update status badge
+                if (response.ok) {
+                    document.getElementById('statusBadge').className = 'status-badge status-success';
+                    document.getElementById('statusBadge').textContent = `✓ Success (${response.status})`;
+                } else {
+                    document.getElementById('statusBadge').className = 'status-badge status-error';
+                    document.getElementById('statusBadge').textContent = `✗ Error (${response.status})`;
+                }
+
+                // Update stats
+                document.getElementById('statusCode').textContent = response.status;
+                document.getElementById('responseTime').textContent = `${responseTime}ms`;
+                
+                // Count data items
+                let dataCount = 0;
+                if (responseData && responseData.data && Array.isArray(responseData.data)) {
+                    dataCount = responseData.data.length;
+                } else if (Array.isArray(responseData)) {
+                    dataCount = responseData.length;
+                }
+                document.getElementById('dataCount').textContent = dataCount;
+                document.getElementById('statsSection').style.display = 'grid';
+
+            } catch (error) {
+                // CORS Error handling
+                let errorMessage = `❌ Error: ${error.message}\n\n`;
+                
+                if (error.message.includes('Failed to fetch')) {
+                    errorMessage += `🚫 CORS Error Detected!\n\n`;
+                    errorMessage += `This error occurs because the browser blocks requests from local HTML files to external APIs.\n\n`;
+                    errorMessage += `📋 Solutions:\n\n`;
+                    errorMessage += `1. Use a browser extension to disable CORS:\n`;
+                    errorMessage += `   - Chrome: "CORS Unblock" or "Allow CORS"\n`;
+                    errorMessage += `   - Firefox: "CORS Everywhere"\n\n`;
+                    errorMessage += `2. Use a proxy service:\n`;
+                    errorMessage += `   - https://cors-anywhere.herokuapp.com/\n`;
+                    errorMessage += `   - https://corsproxy.io/\n\n`;
+                    errorMessage += `3. Test using Postman or Thunder Client (VS Code extension)\n\n`;
+                    errorMessage += `4. Run a local server:\n`;
+                    errorMessage += `   - Python: python -m http.server 8000\n`;
+                    errorMessage += `   - Node.js: npx http-server\n\n`;
+                    errorMessage += `📝 API Details for Manual Testing:\n`;
+                    errorMessage += `URL: ${API_BASE_URL}${endpoint}\n`;
+                    errorMessage += `Method: GET\n`;
+                    errorMessage += `Authorization: Basic ${btoa(`${userId}:${password}`)}\n`;
+                } else {
+                    errorMessage += `Details:\n${error.stack}`;
+                }
+                
+                document.getElementById('responseBox').textContent = errorMessage;
+                document.getElementById('statusBadge').className = 'status-badge status-error';
+                document.getElementById('statusBadge').textContent = '✗ CORS Error';
+                document.getElementById('copyBtn').style.display = 'none';
+            } finally {
+                // Reset button state
+                document.getElementById('btnText').textContent = '🚀 Test API';
+                document.getElementById('btnLoading').classList.add('hidden');
+            }
+        }
+
+        function clearResponse() {
+            document.getElementById('responseBox').innerHTML = '<span style="color: #808080;">Response will appear here...</span>';
+            document.getElementById('statusBadge').classList.add('hidden');
+            document.getElementById('copyBtn').style.display = 'none';
+            document.getElementById('statsSection').style.display = 'none';
+            document.getElementById('statusCode').textContent = '-';
+            document.getElementById('responseTime').textContent = '-';
+            document.getElementById('dataCount').textContent = '-';
+        }
+
+        function copyResponse() {
+            const responseText = document.getElementById('responseBox').textContent;
+            navigator.clipboard.writeText(responseText).then(() => {
+                const btn = document.getElementById('copyBtn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('password').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                testAPI();
+            }
+        });
+    </script>
+</body>
+</html>
