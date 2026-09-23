@@ -16,21 +16,16 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
-      },
-      "env": {
-        "NODE_ENV": "production"
       }
     },
     "production": {
+      "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
       },
       "ios": {
         "buildConfiguration": "Release",
         "distribution": "store"
-      },
-      "env": {
-        "NODE_ENV": "production"
       }
     }
   },

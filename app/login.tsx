@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,10 +31,8 @@ export default function LoginScreen() {
         const password = await SecureStore.getItemAsync("password");
 
         if (userId && password) {
-          // User is already logged in, redirect to home
           navigation.replace('HomeNew');
         } else {
-          // No credentials found, stay on login screen
           setIsCheckingAuth(false);
         }
       } catch (error) {
@@ -44,7 +42,7 @@ export default function LoginScreen() {
     };
     
     checkAuth();
-  }, []); // Remove router dependency to prevent infinite calls
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -55,34 +53,56 @@ export default function LoginScreen() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("https://myimc.in/flutter/login/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userid: email, password }),
-      });
+      const response = await fetch("https://planet.imcbs.com/api/usermanagement/login/", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: email, password }),
+});
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === "active") {
-          const name = data.name || "User";
+if (response.ok) {
+  const data = await response.json();
+  console.log('Login API response:', JSON.stringify(data));
+  if (data.token) {
+    const name = data.username || "User";
 
-          try {
-            await SecureStore.setItemAsync('userId', email);
-            await SecureStore.setItemAsync('password', password);
-            await SecureStore.setItemAsync('username', name);
-            console.log('Credentials saved successfully');
-          } catch (error) {
-            console.error('Error saving credentials:', error);
-            Alert.alert('Warning', 'Login successful but failed to save credentials locally');
-          }
+ 
+    let departmentArr: string[] = [];
+    try {
+      const parsed = typeof data.department === 'string' ? JSON.parse(data.department) : data.department;
+      departmentArr = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+    } catch {
+      departmentArr = [];
+    }
+    const branchesArr: string[] = Array.isArray(data.branches) ? data.branches : [];
+    const menuKeysArr: string[] = Array.isArray(data.menu_keys) ? data.menu_keys : [];
 
-          navigation.replace('HomeNew');
-        } else {
-          Alert.alert("Login Failed", "Your account is not active.");
-        }
-      } else {
-        Alert.alert("Login Failed", "Invalid credentials.");
-      }
+    try {
+      await SecureStore.setItemAsync('userId', email);
+      await SecureStore.setItemAsync('password', password);
+      await SecureStore.setItemAsync('username', name);
+      await SecureStore.setItemAsync('token', data.token);
+      await SecureStore.setItemAsync('loginId', String(data.id ?? ''));
+      await SecureStore.setItemAsync('role', data.role || '');
+      await SecureStore.setItemAsync('branches', JSON.stringify(branchesArr));
+      await SecureStore.setItemAsync('company', data.company || '');
+      await SecureStore.setItemAsync('department', JSON.stringify(departmentArr));
+      await SecureStore.setItemAsync('menuKeys', JSON.stringify(menuKeysArr));
+      console.log('Credentials saved successfully');
+    } catch (error) {
+      console.error('Error saving credentials:', error);
+      Alert.alert('Warning', 'Login successful but failed to save credentials locally');
+    }
+
+    navigation.replace('HomeNew', { username: name });
+
+  } else {
+    Alert.alert("Login Failed", "Your account is not active.");
+  }
+} else {
+  const errorData = await response.text();
+  console.log('Login failed - status:', response.status, 'body:', errorData);
+  Alert.alert("Login Failed", `Status ${response.status}: ${errorData}`);
+}
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Network or server issue.");
@@ -91,7 +111,6 @@ export default function LoginScreen() {
     }
   };
 
-  // Show loading screen while checking authentication
   if (isCheckingAuth) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -103,7 +122,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Decorative Background Elements */}
+   
       <View style={styles.decorativeBackground}>
         <View style={styles.decorativeCircle1} />
         <View style={styles.decorativeCircle2} />
@@ -119,7 +138,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Logo Header */}
+       
           <View style={styles.header}>
             <Image 
               source={require('../assets/images/logo_blk.png')}

@@ -2,7 +2,6 @@
 # Run this in PowerShell from the app directory
 
 $files = @(
-    "view-early-requests.tsx",
     "notifications.tsx",
     "about.tsx"
 )
@@ -25,15 +24,10 @@ foreach ($file in $files) {
     # Fix navigation calls
     $content = $content -replace "router\.back\(\)", "navigation.goBack()"
     $content = $content -replace "router\.replace\('/login'\)", "navigation.replace('Login')"
-    $content = $content -replace "router\.push\('/leave-request'\)", "navigation.navigate('LeaveRequest')"
-    $content = $content -replace "router\.push\('/late-request'\)", "navigation.navigate('LateRequest')"
-    $content = $content -replace "router\.push\('/early-request'\)", "navigation.navigate('EarlyRequest')"
     $content = $content -replace "router\.push\('/notifications'\)", "navigation.navigate('Notifications')"
     $content = $content -replace "router\.push\('/about'\)", "navigation.navigate('About')"
     $content = $content -replace "router\.push\('/profile'\)", "navigation.navigate('Profile')"
     $content = $content -replace "router\.push\('/home-new'\)", "navigation.navigate('HomeNew')"
-    $content = $content -replace "router\.push\('/punch-redesign'\)", "navigation.navigate('PunchRedesign')"
-    $content = $content -replace "router\.push\('/request'\)", "navigation.navigate('Request')"
     
     # Fix dependency arrays
     $content = $content -replace ", router\]", "]"

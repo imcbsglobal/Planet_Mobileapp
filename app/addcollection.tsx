@@ -1,9 +1,8 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -12,10 +11,10 @@ import {
   Dimensions,
   FlatList,
   Image,
-  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,650 +23,627 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+/* ─────────────────────────── Types ─────────────────────────── */
+
 interface UserCredentials {
   userId: string;
   password: string;
+  username?: string;
 }
 
 interface Customer {
   id: string;
+  code?: string;
   name: string;
   place?: string;
+  departmentCode?: string;
+  clientId?: string;
+  company?: string;
   isManual?: boolean;
+  balance?: number; // debit - credit from acc-master API
 }
 
 interface Branch {
   id: string;
   name: string;
   code?: string;
+  clientId?: string;
+  company?: string;
 }
+
+interface CompanyOption {
+  id: string;
+  name: string;
+  clientId?: string;
+  code?: string;
+}
+
+// Matches the API collection_type values
+type CollectionType = 'upi' | 'cash' | 'cheque' | 'neft' | 'bank_transfer';
 
 interface CollectionEntry {
   id: string;
   customerId: string;
   customerName: string;
   customerPlace?: string;
+  company?: string;
   branchId: string;
   branchName: string;
   amount: string;
+  paidFor?: string;
   notes?: string;
   screenshot: string | null;
   createdAt: string;
-  paymentMethod?: 'UPI' | 'cash' | 'cheque' | 'neft';
+  collectionType?: CollectionType;
+  collectionTypeDisplay?: string;
+  paymentProofUrl?: string | null;
+  status?: string;
+  createdByName?: string;
 }
 
-type PaymentMethod = 'UPI' | 'cash' | 'cheque' | 'neft';
+interface PaymentProofAsset {
+  uri: string;
+  name: string;
+  type: string;
+}
 
-const API_BASE_URL = 'https://myimc.in/app4/api';
-const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
+const formatServerError = (responseText: string) => {
+  try {
+    const parsed = JSON.parse(responseText);
+    const detail = parsed.errors || parsed.data || parsed.details || parsed;
 
-const PAYMENT_METHODS = [
-  { id: 'UPI', label: 'UPI', icon: 'logo-google' },
-  { id: 'cash', label: 'Cash', icon: 'cash-outline' },
-  { id: 'cheque', label: 'Cheque', icon: 'document-text-outline' },
-  { id: 'neft', label: 'NEFT', icon: 'card-outline' },
+    if (parsed.message && detail && detail !== parsed.message) {
+      return `${parsed.message}\n${JSON.stringify(detail, null, 2)}`;
+    }
+
+    return parsed.message || parsed.detail || parsed.error || JSON.stringify(parsed, null, 2);
+  } catch {
+    return responseText;
+  }
+};
+
+/* ─────────────────────────── Constants ─────────────────────── */
+
+const API_BASE_URL = 'https://my.myimc.in/app4/api';
+const ADD_COLLECTION_API_URL = 'https://planet.imcbs.com/api/collection/collections/add/';
+const COMPANY_API_URL = 'https://planet.imcbs.com/api/master/company/';
+const ACC_DEPARTMENTS_API_URL = 'https://accmaster.imcbs.com/api/sync/acc-departments/';
+const ACC_MASTER_API_URL = 'https://accmaster.imcbs.com/api/sync/acc-master/';
+const ALL_DEPARTMENTS_ID = '__ALL_DEPARTMENTS__';
+const ALL_DEPARTMENTS_BRANCH: Branch = { id: ALL_DEPARTMENTS_ID, name: 'All Departments', code: '' };
+const DEFAULT_COMPANY_OPTIONS: CompanyOption[] = [
+  { id: 'sysmac_computers', name: 'Sysmac Computers' },
+  { id: 'sysmac_info', name: 'Sysmac Info' },
+  { id: 'imcb_llp', name: 'IMCB LLP' },
+];
+const { height: screenHeight } = Dimensions.get('window');
+
+const COLLECTION_TYPES: { id: CollectionType; label: string; icon: string }[] = [
+  { id: 'upi',           label: 'UPI',           icon: 'logo-google' },
+  { id: 'cash',          label: 'Cash',          icon: 'cash-outline' },
+  { id: 'cheque',        label: 'Cheque',        icon: 'document-text-outline' },
+  { id: 'neft',          label: 'NEFT',          icon: 'card-outline' },
+  { id: 'bank_transfer', label: 'Bank Transfer', icon: 'business-outline' },
 ];
 
 const MAX_FETCH_ATTEMPTS = 3;
-const FETCH_TIMEOUT = 15000; // 15 seconds
-const RETRY_DELAY = 2000; // 2 seconds
+const FETCH_TIMEOUT = 15000;
+const RETRY_DELAY = 2000;
+
+/* ─────────────────────────── Component ─────────────────────── */
 
 export default function AddCollection() {
-  const navigation = useNavigation();
-  const route = useRoute();
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const params = route.params || {};
-  
-  const editData = params.editData ? JSON.parse(params.editData as string) as CollectionEntry : null;
 
-  const [showSuccessCard, setShowSuccessCard] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [userCredentials, setUserCredentials] = useState<UserCredentials | null>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [isInitializing, setIsInitializing] = useState(true);
-  
+  const editData: CollectionEntry | null = params.editData
+    ? JSON.parse(params.editData as string)
+    : null;
+
+  /* ── State ── */
+  const [showSuccessCard, setShowSuccessCard]   = useState(false);
+  const [loading, setLoading]                   = useState(false);
+  const [userCredentials, setUserCredentials]   = useState<UserCredentials | null>(null);
+  const [isInitializing, setIsInitializing]     = useState(true);
+
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  
+  const [branches, setBranches]   = useState<Branch[]>([]);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+
+  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
-  
+  const [showBranchDropdown, setShowBranchDropdown]     = useState(false);
+
+  const [companySearchText, setCompanySearchText]   = useState('');
   const [customerSearchText, setCustomerSearchText] = useState('');
-  const [branchSearchText, setBranchSearchText] = useState('');
+  const [branchSearchText, setBranchSearchText]     = useState('');
 
   const [isManualCustomerMode, setIsManualCustomerMode] = useState(false);
-  const [manualCustomerName, setManualCustomerName] = useState('');
-  const [manualCustomerPlace, setManualCustomerPlace] = useState('');
+  const [manualCustomerName, setManualCustomerName]     = useState('');
+  const [manualCustomerPlace, setManualCustomerPlace]   = useState('');
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(editData?.customerId || '');
+  // Form fields
+  const [selectedCustomerId, setSelectedCustomerId]     = useState<string>(editData?.customerId || '');
   const [selectedCustomerPlace, setSelectedCustomerPlace] = useState<string>(editData?.customerPlace || '');
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(editData?.branchId || '');
-  const [amount, setAmount] = useState<string>(editData?.amount || '');
-  const [notes, setNotes] = useState<string>(editData?.notes || '');
-  const [screenshot, setScreenshot] = useState<string | null>(editData?.screenshot || null);
-  const [screenshotBase64, setScreenshotBase64] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(editData?.paymentMethod || 'UPI');
+  const [company, setCompany]                           = useState<string>(editData?.company || '');
+  const [selectedBranchId, setSelectedBranchId]         = useState<string>(editData?.branchId || '');
+  const [amount, setAmount]                             = useState<string>(editData?.amount || '');
+  const [paidFor, setPaidFor]                           = useState<string>(editData?.paidFor || '');
+  const [notes, setNotes]                               = useState<string>(editData?.notes || '');
+  const [screenshot, setScreenshot]                     = useState<string | null>(editData?.screenshot || null);
+  const [paymentProofAsset, setPaymentProofAsset]       = useState<PaymentProofAsset | null>(null);
+  const [collectionType, setCollectionType]             = useState<CollectionType>(editData?.collectionType || 'upi');
 
-  // New state for retry logic
-  const [branchFetchAttempts, setBranchFetchAttempts] = useState(0);
+  const [branchFetchAttempts, setBranchFetchAttempts]     = useState(0);
   const [customerFetchAttempts, setCustomerFetchAttempts] = useState(0);
-  const [isFetchingBranches, setIsFetchingBranches] = useState(false);
-  const [isFetchingCustomers, setIsFetchingCustomers] = useState(false);
+  const [isFetchingBranches, setIsFetchingBranches]       = useState(false);
+  const [isFetchingCustomers, setIsFetchingCustomers]     = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
-  useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      'keyboardDidShow',
-      (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-      }
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      'keyboardDidHide',
-      () => {
-        setKeyboardHeight(0);
-      }
-    );
+  /* ── Derived ── */
+  const selectedCompany = useMemo(
+    () => companies.find(c => c.name === company),
+    [companies, company],
+  );
 
-    return () => {
-      keyboardDidHideListener.remove();
-      keyboardDidShowListener.remove();
-    };
-  }, []);
+  const selectedCustomer = useMemo(() => customers.find(c => c.id === selectedCustomerId), [customers, selectedCustomerId]);
+const selectedBranch = useMemo(() => {
+  if (selectedBranchId === ALL_DEPARTMENTS_ID) return ALL_DEPARTMENTS_BRANCH;
+  return branches.find(b => b.id === selectedBranchId);
+}, [branches, selectedBranchId]);
 
-  const filteredCustomers = useMemo(() => {
-    let filtered = customers;
-    
-    if (customerSearchText.trim()) {
-      filtered = customers.filter(customer =>
-        customer.name.toLowerCase().includes(customerSearchText.toLowerCase()) ||
-        (customer.place && customer.place.toLowerCase().includes(customerSearchText.toLowerCase()))
-      );
-    }
-    
-    return filtered.sort((a, b) => a.name.localeCompare(b.name));
-  }, [customers, customerSearchText]);
+const companyScopedBranches = useMemo(() => {
+  const scoped = !selectedCompany?.clientId
+    ? branches
+    : branches.filter(b => b.clientId === selectedCompany.clientId);
+
+  // Show every department the user has access to, even ones with no
+  // clients under them yet — a department shouldn't disappear from the
+  // picker just because nobody's been added there in the client master.
+  return [ALL_DEPARTMENTS_BRANCH, ...scoped];
+}, [branches, selectedCompany]);
+
+ const filteredCustomers = useMemo(() => {
+const isAllDepartments = selectedBranch?.id === ALL_DEPARTMENTS_ID;
+const selectedDepartmentCode = isAllDepartments ? '' : (selectedBranch?.code || '');
+  const scoped = customers.filter(c => {
+    const companyMatches =
+      !selectedCompany?.clientId ||
+      c.clientId === selectedCompany.clientId;
+    const departmentMatches =
+      !selectedDepartmentCode ||
+      (c.departmentCode || '').toLowerCase() === selectedDepartmentCode.toLowerCase();
+
+    return companyMatches && departmentMatches;
+  });
+    const base = customerSearchText.trim()
+      ? scoped.filter(c =>
+          c.name.toLowerCase().includes(customerSearchText.toLowerCase()) ||
+          (c.code && c.code.toLowerCase().includes(customerSearchText.toLowerCase())) ||
+          (c.place && c.place.toLowerCase().includes(customerSearchText.toLowerCase()))
+        )
+      : scoped;
+    return [...base].sort((a, b) => a.name.localeCompare(b.name));
+  }, [customers, customerSearchText, selectedBranch, selectedCompany]);
 
   const filteredBranches = useMemo(() => {
-    if (!branchSearchText.trim()) return branches;
-    
-    return branches.filter(branch =>
-      branch.name.toLowerCase().includes(branchSearchText.toLowerCase()) ||
-      (branch.code && branch.code.toLowerCase().includes(branchSearchText.toLowerCase()))
+    if (!branchSearchText.trim()) return companyScopedBranches;
+    return companyScopedBranches.filter(b =>
+      b.name.toLowerCase().includes(branchSearchText.toLowerCase()) ||
+      (b.code && b.code.toLowerCase().includes(branchSearchText.toLowerCase()))
     );
-  }, [branches, branchSearchText]);
+  }, [companyScopedBranches, branchSearchText]);
 
-  const selectedCustomer = useMemo(() => 
-    customers.find(c => c.id === selectedCustomerId), 
-    [customers, selectedCustomerId]
-  );
+  const filteredCompanies = useMemo(() => {
+    if (!companySearchText.trim()) return companies;
+    return companies.filter(c =>
+      c.name.toLowerCase().includes(companySearchText.toLowerCase()) ||
+      (c.clientId && c.clientId.toLowerCase().includes(companySearchText.toLowerCase()))
+    );
+  }, [companies, companySearchText]);
 
-  const selectedBranch = useMemo(() => 
-    branches.find(b => b.id === selectedBranchId), 
-    [branches, selectedBranchId]
-  );
+  const requiresProof = collectionType !== 'cash';
 
-  const initializeUser = async () => {
-    try {
-      const [userId, password] = await Promise.all([
-        SecureStore.getItemAsync('userId'),
-        SecureStore.getItemAsync('password'),
-      ]);
+  /* ── API helper ── */
+  const makeAPICall = async (
+    endpoint: string,
+    method = 'GET',
+    body: any = null,
+    isFormData = false,
+  ) => {
+    if (!userCredentials) throw new Error('User credentials not available');
 
-      if (userId && password) {
-        console.log('✅ User credentials loaded:', userId);
-        const credentials = { userId, password };
-        setUserCredentials(credentials);
-        return credentials;
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
+    const config: RequestInit = {
+      method,
+      headers: {
+        Authorization: `Basic ${btoa(`${userCredentials.userId}:${userCredentials.password}`)}`,
+      },
+      signal: controller.signal,
+      credentials: 'include',
+    };
+
+    if (body && method !== 'GET') {
+      if (isFormData) {
+        config.body = body;
       } else {
-        console.log('❌ No credentials found, redirecting to login');
-        navigation.replace('Login');
-        return null;
+        (config.headers as any)['Content-Type'] = 'application/json';
+        config.body = JSON.stringify(body);
       }
-    } catch (error) {
-      console.error('❌ Error initializing user:', error);
-      navigation.replace('Login');
-      return null;
     }
-  };
 
-  const makeAPICall = async (endpoint: string, method: string = 'GET', body: any = null, isFormData: boolean = false) => {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    clearTimeout(timeoutId);
+
+    const responseText = await response.text();
+
+    if (responseText.trim().startsWith('<!DOCTYPE html') || responseText.trim().startsWith('<html')) {
+      throw new Error('Authentication failed - received login page instead of data');
+    }
+    if (response.status === 404) throw new Error(`Endpoint not found: ${endpoint}`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
+
     try {
-      if (!userCredentials) {
-        throw new Error('User credentials not available');
-      }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-
-      const config: RequestInit = {
-        method,
-        headers: {
-          'Authorization': `Basic ${btoa(`${userCredentials.userId}:${userCredentials.password}`)}`,
-        },
-        signal: controller.signal,
-        credentials: 'include', // IMPORTANT: Include cookies
-      };
-
-      if (body && method !== 'GET') {
-        if (isFormData) {
-          config.body = body;
-        } else {
-          config.headers = {
-            ...config.headers,
-            'Content-Type': 'application/json',
-          };
-          config.body = JSON.stringify(body);
-        }
-      }
-
-      console.log(`📡 Making API call to: ${API_BASE_URL}${endpoint}`);
-      console.log(`📡 Method: ${method}`);
-      console.log(`📡 Auth: ${userCredentials.userId}`);
-      
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-      clearTimeout(timeoutId);
-      
-      console.log(`📡 Response status: ${response.status}`);
-      console.log(`📡 Response Content-Type:`, response.headers.get('content-type'));
-      
-      // Get raw response text first
-      const responseText = await response.text();
-      console.log(`📡 Raw response (first 500 chars):`, responseText.substring(0, 500));
-      
-      // Check if response is HTML (login page)
-      if (responseText.trim().startsWith('<!DOCTYPE html') || responseText.trim().startsWith('<html')) {
-        console.error('❌ Received HTML instead of JSON - Authentication failed or session expired');
-        throw new Error('Authentication failed - received login page instead of data');
-      }
-      
-      if (response.status === 404) {
-        throw new Error(`Endpoint not found: ${endpoint}`);
-      }
-      
-      if (!response.ok) {
-        console.error(`❌ API Error Response: ${responseText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
-      }
-
-      // Try to parse JSON
-      try {
-        const result = JSON.parse(responseText);
-        console.log(`✅ API Response received and parsed successfully`);
-        return result;
-      } catch (parseError) {
-        console.error('❌ JSON Parse Error. Response was:', responseText.substring(0, 1000));
-        throw new Error(`Invalid JSON response from server. Got: ${responseText.substring(0, 100)}`);
-      }
-      
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.error(`⏱️ Request timeout for ${endpoint}`);
-        throw new Error('Request timeout');
-      }
-      console.error(`❌ API call failed for ${endpoint}:`, error);
-      throw error;
+      return JSON.parse(responseText);
+    } catch {
+      throw new Error(`Invalid JSON response from server.`);
     }
   };
 
-  const loadManualCustomers = async () => {
+  /* ── Customers ── */
+  const fetchExternalArray = async (url: string) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    const responseText = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${responseText}`);
+
+    const parsed = JSON.parse(responseText);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.data)) return parsed.data;
+    if (Array.isArray(parsed?.results)) return parsed.results;
+    throw new Error('Invalid API response');
+  };
+
+  const getFirstValue = (item: any, keys: string[]) => {
+    for (const key of keys) {
+      const value = item?.[key];
+      if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    }
+    return '';
+  };
+
+  const getCompanyFromRecord = (item: any) => getFirstValue(item, [
+    'company',
+    'company_name',
+    'companyName',
+    'client_company',
+    'firm',
+    'firm_name',
+    'organization',
+    'organisation',
+  ]);
+
+// client_ids that should never appear in the Select Company list
+const EXCLUDED_CLIENT_IDS = new Set(['NTS04WC95G3U4'.toLowerCase()]);
+
+// Company master API returns the real company_name directly, so no more
+// guessing the name from acc-master/acc-departments rows or a manual map.
+const buildCompanyOptionsFromApi = (rows: any[]): CompanyOption[] => {
+  const byClientId = new Map<string, CompanyOption>();
+
+  rows.forEach((item) => {
+    const clientId = getFirstValue(item, ['client_id', 'clientId', 'client']);
+    if (!clientId) return; // company must be identifiable by its client_id
+    const key = clientId.toLowerCase();
+    if (EXCLUDED_CLIENT_IDS.has(key)) return; // hide this client entirely
+
+    const name = getFirstValue(item, ['company_name', 'name']) || clientId;
+    const code = getFirstValue(item, ['code']);
+    const id   = getFirstValue(item, ['id']) || clientId;
+
+    byClientId.set(key, { id, name, clientId, code });
+  });
+
+  const options = [...byClientId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return options.length > 0 ? options : DEFAULT_COMPANY_OPTIONS;
+};
+
+  const loadManualCustomers = async (): Promise<Customer[]> => {
     try {
       if (!userCredentials?.userId) return [];
-      
-      const storageKey = `manual_customers_${userCredentials.userId}`;
-      const storedManualCustomers = await AsyncStorage.getItem(storageKey);
-      
-      if (storedManualCustomers) {
-        return JSON.parse(storedManualCustomers);
-      }
-      return [];
-    } catch (error) {
-      console.error('Error loading manual customers:', error);
+      const key    = `manual_customers_${userCredentials.userId}`;
+      const stored = await AsyncStorage.getItem(key);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
       return [];
     }
+  };
+
+  const saveManualCustomers = async (list: Customer[]) => {
+    try {
+      if (!userCredentials?.userId) return;
+      await AsyncStorage.setItem(`manual_customers_${userCredentials.userId}`, JSON.stringify(list));
+    } catch {}
+  };
+
+  const loadCustomersFromCache = async () => {
+    try {
+      const cached  = await AsyncStorage.getItem('cached_customers');
+      if (cached) {
+        setCustomers(JSON.parse(cached));
+        return;
+      }
+    } catch {}
+    setCustomers([]);
   };
 
   const fetchCustomers = async () => {
-    if (isFetchingCustomers) {
-      console.log('⚠️ Already fetching customers, skipping...');
-      return;
-    }
-
+    if (isFetchingCustomers) return;
     try {
       setIsFetchingCustomers(true);
-      console.log('=== FETCHING CUSTOMERS ===');
-      console.log('Current userCredentials:', userCredentials ? 'Available' : 'Not Available');
-      
-      if (!userCredentials) {
-        console.log('⚠️ User credentials not available, using cache/mock');
-        await loadCustomersFromCache();
-        return;
-      }
-      
-      console.log('✅ Fetching customers from API...');
-      const response = await makeAPICall('/clients');
-      
-      if (response && Array.isArray(response)) {
-        console.log('✅ Customers API response count:', response.length);
-        
-        const formattedCustomers: Customer[] = response.map((customer: any, index: number) => ({
-          id: customer.code || customer.id?.toString() || index.toString(),
-          name: customer.name,
-          place: customer.place || customer.location || customer.address || customer.address3 || '',
-          isManual: false,
-        }));
-        
-        console.log('✅ Formatted customers count:', formattedCustomers.length);
-        
-        const manualCustomers = await loadManualCustomers();
-        const allCustomers = [...formattedCustomers, ...manualCustomers];
-        
-        setCustomers(prevCustomers => {
-          if (JSON.stringify(prevCustomers) === JSON.stringify(allCustomers)) {
-            return prevCustomers;
-          }
-          return allCustomers;
+
+      const data = await fetchExternalArray(ACC_MASTER_API_URL);
+      const formatted: Customer[] = data
+        .filter((c: any) => getFirstValue(c, ['name']))
+        .map((c: any, i: number) => {
+          const debit  = parseFloat(c.debit  ?? '0') || 0;
+          const credit = parseFloat(c.credit ?? '0') || 0;
+          return {
+            id:             getFirstValue(c, ['code', 'id']) || i.toString(),
+            code:           getFirstValue(c, ['code']),
+            name:           getFirstValue(c, ['name']),
+            place:          getFirstValue(c, ['place', 'location', 'address', 'address3']),
+            departmentCode: getFirstValue(c, ['openingdepartment', 'department_code', 'department', 'dept', 'branch_code']),
+            clientId:       getFirstValue(c, ['client_id', 'clientId', 'client']),
+            company:        getCompanyFromRecord(c),
+            isManual:       false,
+            balance:        debit - credit,
+          };
         });
-        
-        await AsyncStorage.setItem('cached_customers', JSON.stringify(formattedCustomers));
-        console.log('✅ Customers saved to cache');
-        setCustomerFetchAttempts(0);
-        return;
-      }
-    } catch (error) {
-      console.log('❌ Error fetching customers:', error);
-      
+
+      setCustomers(formatted);
+      await AsyncStorage.setItem('cached_customers', JSON.stringify(formatted));
+      setCustomerFetchAttempts(0);
+      return;
+    } catch (err) {
       if (customerFetchAttempts < MAX_FETCH_ATTEMPTS) {
-        console.log(`Retrying customer fetch... Attempt ${customerFetchAttempts + 1}/${MAX_FETCH_ATTEMPTS}`);
-        setCustomerFetchAttempts(prev => prev + 1);
-        setTimeout(() => {
-          setIsFetchingCustomers(false);
-          fetchCustomers();
-        }, RETRY_DELAY);
+        setCustomerFetchAttempts(p => p + 1);
+        setTimeout(() => { setIsFetchingCustomers(false); fetchCustomers(); }, RETRY_DELAY);
         return;
       }
     } finally {
       setIsFetchingCustomers(false);
     }
-    
     await loadCustomersFromCache();
   };
 
-  const loadCustomersFromCache = async (): Promise<boolean> => {
+  /* ── Branches ── */
+  const loadBranchesFromCache = async (): Promise<boolean> => {
     try {
-      const cachedCustomers = await AsyncStorage.getItem('cached_customers');
-      const manualCustomers = await loadManualCustomers();
-      
-      if (cachedCustomers) {
-        const parsed = JSON.parse(cachedCustomers);
-        setCustomers([...parsed, ...manualCustomers]);
-        console.log('✅ Loaded customers from cache');
-        return true;
+      const cached = await AsyncStorage.getItem('cached_branches');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) { setBranches(parsed); return true; }
       }
-    } catch (cacheError) {
-      console.log('⚠️ No cached customers found');
+    } catch {}
+    setBranches([]);
+    return false;
+  };
+
+  const loadCompaniesFromCache = async (): Promise<boolean> => {
+    try {
+      const cached = await AsyncStorage.getItem('cached_companies');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) { setCompanies(parsed); return true; }
+      }
+    } catch {}
+    setCompanies(DEFAULT_COMPANY_OPTIONS);
+    return false;
+  };
+
+const fetchCompanies = async () => {
+    try {
+      const rows = await fetchExternalArray(COMPANY_API_URL);
+      const formatted = buildCompanyOptionsFromApi(rows);
+
+      const allowedCompanyRaw = await SecureStore.getItemAsync('company');
+      let allowedCompanies: string[] = [];
+      try {
+        const parsed = allowedCompanyRaw ? JSON.parse(allowedCompanyRaw) : [];
+        allowedCompanies = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+      } catch {
+        // Not JSON — treat the raw string as a single allowed company (legacy format)
+        allowedCompanies = allowedCompanyRaw ? [allowedCompanyRaw] : [];
+      }
+      const normalizedAllowed = allowedCompanies.map(c => c.trim().toLowerCase());
+
+      const scoped = normalizedAllowed.length
+        ? formatted.filter(c =>
+            normalizedAllowed.includes(c.name.trim().toLowerCase()) ||
+            normalizedAllowed.includes((c.clientId || '').trim().toLowerCase()) ||
+            normalizedAllowed.includes((c.code || '').trim().toLowerCase())
+          )
+        : formatted;
+
+      console.log('allowed companies:', allowedCompanies, 'available companies:', formatted.map(c => c.name));
+
+      setCompanies(scoped);
+      await AsyncStorage.setItem('cached_companies', JSON.stringify(scoped));
+    } catch {
+      await loadCompaniesFromCache();
     }
-    
-    const mockCustomers: Customer[] = [
-      { id: 'IN', name: 'ICON RESIDENCY', place: 'OOTY ROAD MEPPADI', isManual: false },
-      { id: 'IM128', name: 'INDO SPICES & PULSES', place: 'HUNSOOR (RITS Wayanad)', isManual: false },
-      { id: 'IM131', name: 'HITLER MENS WEAR', place: 'SULTHAN BATHERY', isManual: false },
-      { id: 'IM132', name: 'HIGHNESS GRILLS RESTAURANT', place: 'KALPETTA', isManual: false },
-      { id: 'IM133', name: 'FAMILY HYPERMART MUKKAM', place: 'MUKKAM', isManual: false },
-      { id: 'IM134', name: 'LOYAL ENTERPRISES', place: 'KOZHIKODE', isManual: false },
-      { id: 'IM135', name: 'CV SUPERMARKET', place: 'WAYANAD', isManual: false },
-    ];
-    
-    const manualCustomers = await loadManualCustomers();
-    setCustomers([...mockCustomers, ...manualCustomers]);
-    await AsyncStorage.setItem('cached_customers', JSON.stringify(mockCustomers));
-    console.log('✅ Using mock customers');
-    return true;
   };
 
   const fetchBranches = async () => {
-    if (isFetchingBranches) {
-      console.log('⚠️ Already fetching branches, skipping...');
-      return;
-    }
-
+    if (isFetchingBranches) return;
     try {
       setIsFetchingBranches(true);
-      console.log('=== FETCHING BRANCHES ===');
-      console.log('API URL:', `${API_BASE_URL}/departments`);
-      
-      if (!userCredentials) {
-        console.log('⚠️ User credentials not available, loading from cache');
-        const cacheLoaded = await loadBranchesFromCache();
-        if (!cacheLoaded) {
-          setTimeout(() => {
-            setIsFetchingBranches(false);
-            if (userCredentials) {
-              fetchBranches();
-            }
-          }, 1000);
-        }
-        return;
-      }
-      
-      console.log('✅ Fetching branches from API with credentials...');
-      
-      const response = await makeAPICall('/departments');
-      
-      console.log('📡 Branches API response:', response);
-      
-      // Handle response with data array (your API structure)
-      let branchesData: any[] = [];
-      
-      if (response && response.data && Array.isArray(response.data)) {
-        console.log('✅ Found branches in response.data:', response.data.length);
-        branchesData = response.data;
-      } else if (response && Array.isArray(response)) {
-        console.log('✅ Found branches in direct response:', response.length);
-        branchesData = response;
-      } else {
-        console.error('❌ Unexpected response structure:', response);
-        throw new Error('Invalid response structure from API');
-      }
-      
-      if (branchesData.length === 0) {
-        throw new Error('No branches data received from API');
-      }
-      
-      // Format branches - handle your specific API structure
-      const formattedBranches: Branch[] = branchesData.map((branch: any, index: number) => {
-        console.log('Processing branch:', branch);
-        
+
+      const data = await fetchExternalArray(ACC_DEPARTMENTS_API_URL);
+
+      const formatted: Branch[] = data.map((b: any, i: number) => {
+        const rawId = getFirstValue(b, ['department_id', 'id', 'code', 'department_code', 'dept']) || i.toString();
         return {
-          id: branch.id?.toString() || index.toString(),
-          name: branch.name || branch.department_name || branch.dept_name || 'Unknown Branch',
-          code: branch.code || branch.dept_code || '',
+          id:       `${rawId}-${i}`,
+          name:     getFirstValue(b, ['department', 'name', 'department_name', 'dept_name']) || 'Unknown',
+          code:     getFirstValue(b, ['department_id', 'code', 'department_code', 'dept']),
+          clientId: getFirstValue(b, ['client_id', 'clientId', 'client']),
+          company:  getCompanyFromRecord(b),
         };
       });
-      
-      console.log('✅ Formatted branches:', formattedBranches.length);
-      console.log('First formatted branch:', formattedBranches[0]);
-      
-      if (formattedBranches.length > 0) {
-        setBranches(formattedBranches);
-        await AsyncStorage.setItem('cached_branches', JSON.stringify(formattedBranches));
-        console.log('✅ Branches saved to cache');
-        setBranchFetchAttempts(0);
+
+     const allowedDeptRaw = await SecureStore.getItemAsync('department');
+      const allowedDepartments: string[] = allowedDeptRaw ? JSON.parse(allowedDeptRaw) : [];
+      const normalizedAllowed = allowedDepartments.map(d => d.trim().toLowerCase());
+      const scoped = normalizedAllowed.length
+        ? formatted.filter(b => normalizedAllowed.includes((b.name || '').trim().toLowerCase()))
+        : formatted;
+      console.log('allowed depts:', allowedDepartments, 'available depts:', formatted.map(b => b.name));
+
+      setBranches(scoped);
+      await AsyncStorage.setItem('cached_branches', JSON.stringify(scoped));
+      setBranchFetchAttempts(0);
+    } catch {
+      const cached = await loadBranchesFromCache();
+      if (!cached && branchFetchAttempts < MAX_FETCH_ATTEMPTS) {
+        setBranchFetchAttempts(p => p + 1);
+        setTimeout(() => { setIsFetchingBranches(false); fetchBranches(); }, RETRY_DELAY);
         return;
-      } else {
-        throw new Error('No branches formatted successfully');
-      }
-      
-    } catch (error) {
-      console.error('❌ Error fetching branches:', error);
-      
-      const cacheLoaded = await loadBranchesFromCache();
-      
-      if (!cacheLoaded && branchFetchAttempts < MAX_FETCH_ATTEMPTS) {
-        console.log(`Retrying branch fetch... Attempt ${branchFetchAttempts + 1}/${MAX_FETCH_ATTEMPTS}`);
-        setBranchFetchAttempts(prev => prev + 1);
-        
-        setTimeout(() => {
-          setIsFetchingBranches(false);
-          fetchBranches();
-        }, RETRY_DELAY);
-        return;
-      }
-      
-      if (!cacheLoaded && branchFetchAttempts >= MAX_FETCH_ATTEMPTS) {
-        Alert.alert(
-          'Connection Issue',
-          'Unable to load branches. Please check your internet connection and try again.',
-          [
-            {
-              text: 'Retry',
-              onPress: () => {
-                setBranchFetchAttempts(0);
-                setIsFetchingBranches(false);
-                fetchBranches();
-              }
-            },
-            {
-              text: 'Cancel',
-              style: 'cancel'
-            }
-          ]
-        );
       }
     } finally {
       setIsFetchingBranches(false);
     }
   };
 
-  const loadBranchesFromCache = async (): Promise<boolean> => {
-    try {
-      const cachedBranches = await AsyncStorage.getItem('cached_branches');
-      
-      if (cachedBranches) {
-        const parsed = JSON.parse(cachedBranches);
-        if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-          console.log('✅ Loaded branches from cache:', parsed.length);
-          console.log('Cache branches:', parsed);
-          setBranches(parsed);
-          return true;
-        }
-      }
-    } catch (cacheError) {
-      console.log('⚠️ Error loading cached branches:', cacheError);
-    }
-    
-    console.log('⚠️ No valid cache available');
-    setBranches([]);
-    return false;
-  };
+  /* ── Initialisation ── */
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const [userId, password, username] = await Promise.all([
+          SecureStore.getItemAsync('userId'),
+          SecureStore.getItemAsync('password'),
+          SecureStore.getItemAsync('username'),
+        ]);
+        if (userId && password) {
+          const creds = { userId, password, username: username || userId };
+          setUserCredentials(creds);
 
+          // ── Show cached data instantly so the screen is usable immediately ──
+          await Promise.all([
+            loadCompaniesFromCache(),
+            loadCustomersFromCache(),
+            loadBranchesFromCache(),
+          ]);
+
+          // ── Mark ready now — user can start filling the form ──
+          setIsInitializing(false);
+
+          // ── Refresh from network in background (no await) ──
+          Promise.all([fetchCompanies(), fetchCustomers(), fetchBranches()]).catch(() => {});
+        } else {
+          navigation.replace('Login');
+        }
+      } catch {
+        await Promise.all([loadCompaniesFromCache(), loadCustomersFromCache(), loadBranchesFromCache()]);
+        setIsInitializing(false);
+      }
+    };
+    init();
+  }, []);
+
+  // Auto-retry branches
+  useEffect(() => {
+    if (userCredentials && branches.length === 0 && !isInitializing && !isFetchingBranches && branchFetchAttempts < MAX_FETCH_ATTEMPTS) {
+      const t = setTimeout(fetchBranches, 2000);
+      return () => clearTimeout(t);
+    }
+  }, [userCredentials, branches.length, isInitializing, isFetchingBranches, branchFetchAttempts]);
+
+  /* ── Handlers ── */
   const handleAddManualCustomer = async () => {
     if (!manualCustomerName.trim()) {
       Alert.alert('Validation Error', 'Please enter customer name.');
       return;
     }
-
     try {
-      const manualId = `MANUAL_${Date.now()}`;
-      
+      const id = `MANUAL_${Date.now()}`;
       const newCustomer: Customer = {
-        id: manualId,
-        name: manualCustomerName.trim(),
-        place: manualCustomerPlace.trim(),
+        id,
+        name:     manualCustomerName.trim(),
+        place:    manualCustomerPlace.trim(),
         isManual: true,
       };
-
-      const manualCustomers = await loadManualCustomers();
-      const updatedManualCustomers = [...manualCustomers, newCustomer];
-      
-      await saveManualCustomers(updatedManualCustomers);
-
+      const existing = await loadManualCustomers();
+      await saveManualCustomers([...existing, newCustomer]);
       setCustomers(prev => [...prev, newCustomer]);
-
-      setSelectedCustomerId(manualId);
+      setSelectedCustomerId(id);
       setSelectedCustomerPlace(manualCustomerPlace.trim());
-
       setIsManualCustomerMode(false);
       setManualCustomerName('');
       setManualCustomerPlace('');
       setShowCustomerDropdown(false);
-
       Alert.alert('Success', 'Customer added successfully!');
-    } catch (error) {
-      console.error('Error adding manual customer:', error);
+    } catch {
       Alert.alert('Error', 'Failed to add customer. Please try again.');
     }
   };
 
-  const saveManualCustomers = async (manualCustomers: Customer[]) => {
-    try {
-      if (!userCredentials?.userId) return;
-      
-      const storageKey = `manual_customers_${userCredentials.userId}`;
-      await AsyncStorage.setItem(storageKey, JSON.stringify(manualCustomers));
-    } catch (error) {
-      console.error('Error saving manual customers:', error);
-    }
-  };
-
-  const toggleManualCustomerMode = () => {
-    setIsManualCustomerMode(!isManualCustomerMode);
-    setManualCustomerName('');
-    setManualCustomerPlace('');
+  const handleCustomerSelect = useCallback((id: string) => {
+    const c = customers.find(x => x.id === id);
+    setSelectedCustomerId(id);
+    setSelectedCustomerPlace(c?.place || '');
+    if (c?.company && !company) setCompany(c.company);
+    setShowCustomerDropdown(false);
     setCustomerSearchText('');
-  };
+  }, [company, customers]);
 
-  const savePaymentMethodToLocalStorage = async (collectionId: string, paymentMethod: PaymentMethod) => {
-    try {
-      if (!userCredentials?.userId) return;
-      
-      const storageKey = `collection_payment_methods_${userCredentials.userId}`;
-      const storedPaymentMethods = await AsyncStorage.getItem(storageKey);
-      const paymentMethods = storedPaymentMethods ? JSON.parse(storedPaymentMethods) : {};
-      
-      paymentMethods[collectionId] = paymentMethod;
-      
-      await AsyncStorage.setItem(storageKey, JSON.stringify(paymentMethods));
-      console.log('✅ Saved payment method to local storage:', { collectionId, paymentMethod });
-    } catch (error) {
-      console.error('❌ ERROR saving payment method to local storage:', error);
-    }
-  };
+  const handleBranchSelect = useCallback((id: string) => {
+    setSelectedBranchId(id);
+    setSelectedCustomerId('');
+    setSelectedCustomerPlace('');
+    setShowBranchDropdown(false);
+    setBranchSearchText('');
+  }, []);
 
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Sorry, we need camera roll permissions to select images.'
-        );
-        return;
-      }
+  const handleCompanySelect = useCallback((item: CompanyOption) => {
+    setCompany(item.name);
+    setSelectedBranchId('');
+    setSelectedCustomerId('');
+    setSelectedCustomerPlace('');
+    setShowCompanyDropdown(false);
+    setCompanySearchText('');
+    setBranchSearchText('');
+    setCustomerSearchText('');
+  }, []);
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        
-        if (asset.base64) {
-          setScreenshotBase64(asset.base64);
-        }
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
-  };
-
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Sorry, we need camera permissions to take photos.'
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        quality: 0.8,
-        base64: true,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        
-        if (asset.base64) {
-          setScreenshotBase64(asset.base64);
-        }
-      }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
-  };
+  const handleCollectionTypeChange = useCallback((type: CollectionType) => {
+    setCollectionType(type);
+    if (type === 'cash') { setScreenshot(null); setPaymentProofAsset(null); }
+  }, []);
 
   const resetForm = useCallback(() => {
     setSelectedCustomerId('');
     setSelectedCustomerPlace('');
+    setCompany('');
     setSelectedBranchId('');
     setAmount('');
+    setPaidFor('');
     setNotes('');
     setScreenshot(null);
-    setScreenshotBase64(null);
-    setPaymentMethod('UPI');
+    setPaymentProofAsset(null);
+    setCollectionType('upi');
+    setShowCompanyDropdown(false);
     setShowCustomerDropdown(false);
     setShowBranchDropdown(false);
+    setCompanySearchText('');
     setCustomerSearchText('');
     setBranchSearchText('');
     setIsManualCustomerMode(false);
@@ -675,1270 +651,1178 @@ export default function AddCollection() {
     setManualCustomerPlace('');
   }, []);
 
-  const handleCustomerSelect = useCallback((customerId: string) => {
-    const selectedCustomerData = customers.find(c => c.id === customerId);
-    
-    setSelectedCustomerId(customerId);
-    setSelectedCustomerPlace(selectedCustomerData?.place || '');
-    setShowCustomerDropdown(false);
-    setCustomerSearchText('');
-  }, [customers]);
+  const buildPaymentProofAsset = (asset: ImagePicker.ImagePickerAsset): PaymentProofAsset => {
+    const uri = asset.uri;
+    const rawName = asset.fileName || asset.uri.split('/').pop() || `payment_proof_${Date.now()}.jpg`;
+    const name = /\.[a-z0-9]+$/i.test(rawName) ? rawName : `${rawName}.jpg`;
+    const extension = (name.match(/\.([a-z0-9]+)$/i)?.[1] || 'jpg').toLowerCase();
+    const normalizedExtension = extension === 'jpg' ? 'jpeg' : extension;
+    const type = asset.mimeType || `image/${normalizedExtension}`;
 
-  const handleBranchSelect = useCallback((branchId: string) => {
-    setSelectedBranchId(branchId);
-    setShowBranchDropdown(false);
-    setBranchSearchText('');
-  }, []);
+    return { uri, name, type };
+  };
 
-  const handlePaymentMethodChange = useCallback((method: PaymentMethod) => {
-    setPaymentMethod(method);
-    if (method === 'cash') {
-      setScreenshot(null);
-      setScreenshotBase64(null);
+  /* ── Image picker ── */
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Camera roll permission is needed.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setScreenshot(asset.uri);
+        setPaymentProofAsset(buildPaymentProofAsset(asset));
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
     }
-  }, []);
+  };
 
+  const takePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Camera permission is needed.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setScreenshot(asset.uri);
+        setPaymentProofAsset(buildPaymentProofAsset(asset));
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
+    }
+  };
+
+  /* ── Submit ── */
   const handleSubmit = async () => {
-    let customerName = '';
+    // Resolve customer name/place
+    let customerName  = '';
     let customerPlace = '';
 
-    if (isManualCustomerMode) {
-      if (!manualCustomerName.trim()) {
-        Alert.alert('Validation Error', 'Please enter customer name.');
-        return;
-      }
-      customerName = manualCustomerName.trim();
-      customerPlace = manualCustomerPlace.trim();
-    } else {
-      if (!selectedCustomerId) {
-        Alert.alert('Validation Error', 'Please select a customer.');
-        return;
-      }
-      if (!selectedCustomer) {
-        Alert.alert('Error', 'Selected customer not found.');
-        return;
-      }
-      customerName = selectedCustomer.name;
-      customerPlace = selectedCustomerPlace;
-    }
-    
-    if (!selectedBranchId) {
-      Alert.alert('Validation Error', 'Please select a branch.');
+    if (!company.trim() || !selectedCompany) {
+      Alert.alert('Validation Error', 'Please select a company from the list.');
       return;
     }
-    
+    if (!selectedBranchId || !selectedBranch) {
+      Alert.alert('Validation Error', 'Please select a department.');
+      return;
+    }
+    if (!selectedCustomerId || !selectedCustomer) {
+      Alert.alert('Validation Error', 'Please select a customer.');
+      return;
+    }
+
+    customerName  = selectedCustomer.name;
+    customerPlace = selectedCustomerPlace;
+
     if (!amount.trim()) {
       Alert.alert('Validation Error', 'Please enter an amount.');
       return;
     }
     
-    if (paymentMethod !== 'cash' && (!screenshot || !screenshotBase64)) {
-      Alert.alert('Validation Error', 'Please add a payment screenshot/photo.');
+    if (requiresProof && !paymentProofAsset) {
+      Alert.alert('Validation Error', 'Please attach a payment proof image.');
+      return;
+    }
+
+    // Snapshot credentials at call time — avoids stale closure issue
+    const creds = userCredentials;
+    if (!creds) {
+      Alert.alert('Error', 'Session expired. Please login again.');
+      navigation.replace('Login');
       return;
     }
 
     try {
       setLoading(true);
-      
-      if (!selectedBranch) {
-        Alert.alert('Error', 'Selected branch not found.');
-        return;
-      }
 
-      if (editData) {
-        console.log('📝 EDIT MODE: Updating existing collection locally');
-        
-        if (userCredentials?.userId) {
-          const storageKey = `collections_${userCredentials.userId}`;
-          const storedCollections = await AsyncStorage.getItem(storageKey);
-          
-          if (storedCollections) {
-            const collections: CollectionEntry[] = JSON.parse(storedCollections);
-            const updatedCollections = collections.map(collection => {
-              if (collection.id === editData.id) {
-                return {
-                  ...collection,
-                  customerId: selectedCustomerId || 'manual',
-                  customerName: customerName,
-                  customerPlace: customerPlace,
-                  branchId: selectedBranchId,
-                  branchName: selectedBranch.name,
-                  amount: amount.trim(),
-                  notes: notes.trim() || 'No notes',
-                  screenshot: screenshot,
-                  paymentMethod: paymentMethod,
-                };
-              }
-              return collection;
-            });
-            
-            await AsyncStorage.setItem(storageKey, JSON.stringify(updatedCollections));
-            console.log('✅ Updated existing collection in local storage:', editData.id);
-          }
-        }
-        
-        if (userCredentials?.userId) {
-          const cachedApiKey = `cached_collections_${userCredentials.userId}`;
-          const cachedCollections = await AsyncStorage.getItem(cachedApiKey);
-          
-          if (cachedCollections) {
-            const apiCollections: CollectionEntry[] = JSON.parse(cachedCollections);
-            const updatedApiCollections = apiCollections.map(collection => {
-              if (collection.id === editData.id) {
-                return {
-                  ...collection,
-                  customerId: selectedCustomerId || 'manual',
-                  customerName: customerName,
-                  customerPlace: customerPlace,
-                  branchId: selectedBranchId,
-                  branchName: selectedBranch.name,
-                  amount: amount.trim(),
-                  notes: notes.trim() || 'No notes',
-                  screenshot: screenshot,
-                  paymentMethod: paymentMethod,
-                };
-              }
-              return collection;
-            });
-            
-            await AsyncStorage.setItem(cachedApiKey, JSON.stringify(updatedApiCollections));
-            console.log('✅ Updated existing collection in API cache:', editData.id);
-          }
-        }
-        
-        await savePaymentMethodToLocalStorage(editData.id, paymentMethod);
-        
-        resetForm();
-        setShowSuccessCard(true);
-        
-        setTimeout(() => {
-          setShowSuccessCard(false);
-          navigation.goBack();
-        }, 2000);
-        
-        return;
-      }
-
-      console.log('➕ ADD MODE: Adding new collection via API');
-      
       const formData = new FormData();
+      const creatorId = creds.userId;
+      const creatorName = creds.username || creds.userId;
 
-      if (userCredentials?.userId) {
-        formData.append('user_id', userCredentials.userId);
-        formData.append('created_by', userCredentials.userId);
-      }
-            
-      formData.append('client_name', customerName);
-      formData.append('client_place', customerPlace);
-      formData.append('department', selectedBranch.name);
-      formData.append('amount', amount.trim());
-      formData.append('payment_method', paymentMethod);
-      
-      const notesToSend = notes.trim() || 'Payment received';
-      formData.append('notes', notesToSend);
-      formData.append('paid_for', notesToSend);
-      
-      formData.append('customer_id', selectedCustomerId || 'manual');
-      formData.append('branch_id', selectedBranchId);
-      
-      if (paymentMethod !== 'cash' && screenshot && screenshotBase64) {
-        const imageUri = screenshot;
-        const filename = imageUri.split('/').pop() || `screenshot_${Date.now()}.jpg`;
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : 'image/jpeg';
-        
-        const imageFile = {
-          uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
-          name: filename,
-          type: type,
-        };
-        
-        formData.append('payment_screenshot', imageFile as any);
+      formData.append('client_name',     customerName);
+      formData.append('company',         company.trim());
+      formData.append('department',      selectedBranch.name);
+      formData.append('collection_type', collectionType);
+      formData.append('amount',          amount.trim());
+      formData.append('paid_for',        paidFor.trim());
+      formData.append('notes',           notes.trim());
+      formData.append('created_by',      creatorId);
+      formData.append('created_by_name', creatorName);
+      formData.append('creator',         creatorName);
+      formData.append('collected_by',    creatorName);
+      formData.append('user_id',         creatorId);
+      formData.append('userid',          creatorId);
+      // Place was being captured in state but never sent — this was why it
+      // never showed up on the collection card. Sending a couple of likely
+      // field-name variants since the exact one the backend expects isn't confirmed.
+      formData.append('place',           customerPlace.trim());
+      formData.append('client_place',    customerPlace.trim());
+
+      // Payment proof — only when required
+     if (requiresProof && paymentProofAsset) {
+      const proofFile = {
+        uri: paymentProofAsset.uri,
+        name: paymentProofAsset.name,
+        type: paymentProofAsset.type,
+      } as any;
+
+      formData.append('payment_proof', proofFile);
+    }
+
+      // Direct fetch — avoids the stale-state risk inside makeAPICall
+      const controller = new AbortController();
+      const timeoutId  = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
+      const response = await fetch(ADD_COLLECTION_API_URL, {
+        method:      'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`${creds.userId}:${creds.password}`)}`,
+        },
+        body:        formData,
+        credentials: 'include',
+        signal:      controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const responseText = await response.text();
+
+      // Show the raw server response in the alert so we can debug
+      if (!response.ok) {
+        const serverMsg = formatServerError(responseText);
+        Alert.alert(
+          `Server Error (${response.status})`,
+          serverMsg.substring(0, 900),
+        );
+        return;
       }
 
-      const response = await makeAPICall('/collections/add/', 'POST', formData, true);
-      const collectionId = response?.data?.id?.toString() || response?.id?.toString() || `temp_${Date.now()}`;
-      
-      console.log('📦 Submission response:', response);
-      
-      if (response && (response.success !== false)) {
-        console.log('💾 Saving payment method for collection:', { collectionId, paymentMethod });
-        await savePaymentMethodToLocalStorage(collectionId, paymentMethod);
-        
-        if (userCredentials?.userId) {
-          const storageKey = `collections_${userCredentials.userId}`;
-          const storedCollections = await AsyncStorage.getItem(storageKey);
-          const collections: CollectionEntry[] = storedCollections ? JSON.parse(storedCollections) : [];
-          
-          const newCollection: CollectionEntry = {
-            id: collectionId,
-            customerId: selectedCustomerId || 'manual',
-            customerName: customerName,
-            customerPlace: customerPlace,
-            branchId: selectedBranchId,
-            branchName: selectedBranch.name,
-            amount: amount.trim(),
-            notes: notesToSend || 'No notes',
-            screenshot: screenshot,
-            createdAt: new Date().toISOString(),
-            paymentMethod: paymentMethod,
-          };
-          
-          collections.push(newCollection);
-          await AsyncStorage.setItem(storageKey, JSON.stringify(collections));
-          console.log('✅ Added new collection to local storage');
+     
+        let result: any = {};
+        try {
+          result = JSON.parse(responseText);
+        } catch {
+          // Non-JSON 2xx — treat as success
         }
-        
-        resetForm();
-        setShowSuccessCard(true);
-        
-        setTimeout(() => {
-          setShowSuccessCard(false);
-          navigation.goBack();
-        }, 2000);
-        
-      } else {
-        throw new Error(response?.error || response?.message || 'Failed to process collection');
+
+        // TEMP DEBUG — remove once confirmed
+        if (__DEV__) {
+        console.log('SUBMIT DEBUG → proof asset sent:', paymentProofAsset);
+        console.log('SUBMIT DEBUG → server returned:', JSON.stringify(result?.data));
       }
-      
+
+      // Save locally and navigate back
+      const newEntry: CollectionEntry = {
+        id:                   result?.data?.id?.toString() || `temp_${Date.now()}`,
+        customerId:           selectedCustomerId || 'manual',
+        customerName,
+        customerPlace,
+        company:              company.trim(),
+        branchId:             selectedBranchId,
+        branchName:           selectedBranch.name,
+        collectionType,
+        collectionTypeDisplay: '',
+        amount:               amount.trim(),
+        paidFor:              paidFor.trim(),
+        notes:                notes.trim(),
+        screenshot,
+        paymentProofUrl:      result?.data?.payment_proof_url || result?.data?.cloudflare_r2_url || screenshot,
+        status:               'pending',
+        createdAt:            result?.data?.created_at || new Date().toISOString(),
+        createdByName:        result?.data?.created_by_name || creatorName,
+      };
+
+      const storageKey  = `collections_${creds.userId}`;
+      const stored      = await AsyncStorage.getItem(storageKey);
+      const existing    = stored ? JSON.parse(stored) : [];
+      existing.unshift(newEntry); // newest first
+      await AsyncStorage.setItem(storageKey, JSON.stringify(existing));
+
+      resetForm();
+      setShowSuccessCard(true);
+      setTimeout(() => { setShowSuccessCard(false); navigation.goBack(); }, 2200);
+
     } catch (error: any) {
-      console.error('❌ Error submitting form:', error);
-      
-      let errorMessage = editData 
-        ? 'Failed to update collection entry. Please try again.'
-        : 'Failed to add collection entry. Please try again.';
-      
-      if (error.message.includes('404')) {
-        errorMessage = 'API endpoint not found. Please contact your administrator.';
-      } else if (error.message.includes('401') || error.message.includes('403')) {
-        errorMessage = 'Authentication failed. Please login again.';
-      } else if (error.message.includes('network') || error.message.includes('timeout')) {
-        errorMessage = 'Network error. Please check your internet connection.';
-      } else if (error.message.includes('Invalid JSON')) {
-        errorMessage = 'Server returned invalid response. Please try again or contact support.';
+      if (error.name === 'AbortError') {
+        Alert.alert('Timeout', 'Request timed out. Check your connection and try again.');
+      } else {
+        // Show the actual error message — not a generic one
+        Alert.alert('Submission Failed', error.message || 'An unexpected error occurred.');
       }
-      
-      Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    const init = async () => {
-      console.log('🔄 Initializing AddCollection screen...');
-      
-      try {
-        const credentials = await initializeUser();
-        
-        if (credentials) {
-          console.log('✅ User credentials loaded, waiting for state update...');
-          
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          console.log('📡 Starting data fetch...');
-          
-          await fetchCustomers();
-          await fetchBranches();
-          
-          console.log('✅ Data fetch complete');
-          console.log('Branches state:', branches.length);
-        } else {
-          console.log('❌ No user credentials found');
-        }
-      } catch (error) {
-        console.error('❌ Error during initialization:', error);
-        await loadCustomersFromCache();
-        await loadBranchesFromCache();
-      } finally {
-        setIsInitializing(false);
-        console.log('✅ Initialization complete');
-      }
-    };
-    
-    init();
-  }, []);
-
-  useEffect(() => {
-    if (userCredentials && 
-        branches.length === 0 && 
-        !isInitializing && 
-        !isFetchingBranches &&
-        branchFetchAttempts < MAX_FETCH_ATTEMPTS) {
-      
-      console.log('🔄 Branches empty after init, scheduling retry...');
-      console.log('User credentials available:', !!userCredentials);
-      
-      const retryTimer = setTimeout(() => {
-        console.log('Retrying branch fetch (auto-retry)...');
-        fetchBranches();
-      }, 2000);
-      
-      return () => clearTimeout(retryTimer);
-    }
-  }, [userCredentials, branches.length, isInitializing, isFetchingBranches, branchFetchAttempts]);
-
-  const renderCustomerItem = useCallback(({ item }: { item: Customer }) => (
-    <TouchableOpacity
-      style={styles.dropdownItem}
-      onPress={() => handleCustomerSelect(item.id)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.customerItemContainer}>
-        <View style={styles.customerNameRow}>
-          <Text style={styles.customerNameText} numberOfLines={1}>
-            {item.name}
-          </Text>
-          {item.isManual && (
-            <View style={styles.manualBadge}>
-              <Text style={styles.manualBadgeText}>Manual</Text>
+  /* ── Render helpers ── */
+  const renderCustomerItem = useCallback(({ item }: { item: Customer }) => {
+    const bal = item.balance ?? 0;
+    const balColor = bal > 0 ? '#16A34A' : bal < 0 ? '#DC2626' : '#A39A85';
+    return (
+      <TouchableOpacity style={styles.dropdownItem} onPress={() => handleCustomerSelect(item.id)} activeOpacity={0.7}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.dropdownItemTitle} numberOfLines={1}>{item.name}</Text>
+              {item.isManual && (
+                <View style={styles.manualBadge}><Text style={styles.manualBadgeText}>Manual</Text></View>
+              )}
             </View>
+            {item.place ? <Text style={styles.dropdownItemSub} numberOfLines={1}>{item.place}</Text> : null}
+          </View>
+          {!item.isManual && item.balance !== undefined && (
+            <Text style={{ fontSize: 13, fontWeight: '700', color: balColor }}>
+              ₹{Math.abs(bal).toFixed(2)}
+            </Text>
           )}
         </View>
-        {item.place && (
-          <Text style={styles.customerPlaceText} numberOfLines={1}>
-            {item.place}
-          </Text>
-        )}
-      </View>
-    </TouchableOpacity>
-  ), [handleCustomerSelect]);
+      </TouchableOpacity>
+    );
+  }, [handleCustomerSelect]);
 
   const renderBranchItem = useCallback(({ item }: { item: Branch }) => (
-    <TouchableOpacity
-      style={styles.dropdownItem}
-      onPress={() => handleBranchSelect(item.id)}
-      activeOpacity={0.7}
-    >
-      <Text style={styles.dropdownItemText} numberOfLines={2}>
-        {item.name} {item.code ? `(${item.code})` : ''}
-      </Text>
-    </TouchableOpacity>
-  ), [handleBranchSelect]);
+  <TouchableOpacity style={styles.dropdownItem} onPress={() => handleBranchSelect(item.id)} activeOpacity={0.7}>
+    <Text style={styles.dropdownItemTitle} numberOfLines={2}>{item.name}</Text>
+  </TouchableOpacity>
+), [handleBranchSelect]);
+const renderCompanyItem = useCallback(({ item }: { item: CompanyOption }) => (
+  <TouchableOpacity style={styles.dropdownItem} onPress={() => handleCompanySelect(item)} activeOpacity={0.7}>
+    <Text style={styles.dropdownItemTitle} numberOfLines={2}>{item.name}</Text>
+    {item.clientId ? (
+      <Text style={styles.dropdownItemSub} numberOfLines={1}>{item.clientId}</Text>
+    ) : null}
+  </TouchableOpacity>
+), [handleCompanySelect]);
 
-  const customerKeyExtractor = useCallback((item: Customer) => item.id, []);
-  const branchKeyExtractor = useCallback((item: Branch) => item.id, []);
-
+ /* ── Loading gate ── */
   if (isInitializing) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text style={styles.loadingText}>Loading...</Text>
+      <View style={styles.initLoader}>
+        <ActivityIndicator size="large" color="#F5C451" />
+        <Text style={styles.initLoaderText}>Loading…</Text>
       </View>
     );
   }
 
+  /* ── Main render ── */
   return (
-    <View style={styles.fullPageModal}>
-      <View style={styles.fullPageHeader}>
-        <TouchableOpacity
-          onPress={() => {
-            resetForm();
-            navigation.goBack();
-          }}
-          style={styles.modalCloseButton}
-        >
-          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
-        </TouchableOpacity>
-        <Text style={styles.fullPageTitle}>
-          {editData ? 'Edit Collection' : 'Add Collection'}
-        </Text>
-        <View style={{ width: 44 }} />
-      </View>
+    <View style={styles.root}>
+    {/* Header */}
+    <View style={styles.header} onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}>
+      <TouchableOpacity style={styles.backButton} onPress={() => { resetForm(); navigation.goBack(); }}>
+        <Ionicons name="arrow-back" size={22} color="#1C1B17" />
+      </TouchableOpacity>
+      <Text style={styles.headerTitle}>{editData ? 'Edit Collection' : 'Add Collection'}</Text>
+      <View style={{ width: 44 }} />
+    </View>
 
-      <KeyboardAvoidingView 
-        style={styles.fullPageContent}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+   <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : headerHeight}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <FlatList
-          data={[
-            {
-              id: 'customer',
-              type: 'dropdown',
-              label: 'Customer *',
-              placeholder: 'Select Customer',
-              value: isManualCustomerMode 
-                ? (manualCustomerName || '')
-                : (selectedCustomer ? `${selectedCustomer.name}` : ''),
-              onPress: () => setShowCustomerDropdown(true),
-            },
-            {
-              id: 'place',
-              type: 'input',
-              label: 'Place',
-              placeholder: 'Customer place',
-              value: isManualCustomerMode ? manualCustomerPlace : selectedCustomerPlace,
-              onChangeText: isManualCustomerMode ? setManualCustomerPlace : setSelectedCustomerPlace,
-              editable: true,
-            },
-            {
-              id: 'branch',
-              type: 'dropdown',
-              label: 'Branch *',
-              placeholder: 'Select Branch',
-              value: selectedBranch ? `${selectedBranch.name}` : '',
-              onPress: () => setShowBranchDropdown(true),
-            },
-            {
-              id: 'paymentMethod',
-              type: 'paymentMethod',
-              label: 'Payment Method *',
-            },
-            {
-              id: 'amount',
-              type: 'input',
-              label: 'Amount *',
-              placeholder: 'Enter amount',
-              value: amount,
-              onChangeText: setAmount,
-              keyboardType: 'numeric',
-            },
-            {
-              id: 'notes',
-              type: 'textarea',
-              label: 'Notes',
-              placeholder: 'Enter notes (optional)',
-              value: notes,
-              onChangeText: setNotes,
-            },
-          ].concat(
-            paymentMethod === 'UPI' ? [{
-              id: 'screenshot',
-              type: 'image',
-              label: 'UPI Screenshot *',
-              value: screenshot,
-              onPress: pickImage,
-            }] : 
-            paymentMethod === 'cheque' ? [{
-              id: 'chequePhoto',
-              type: 'camera',
-              label: 'Cheque Photo *',
-              value: screenshot,
-              onPress: takePhoto,
-            }] : 
-            paymentMethod === 'neft' ? [{
-              id: 'neftScreenshot',
-              type: 'image',
-              label: 'NEFT Screenshot *',
-              value: screenshot,
-              onPress: pickImage,
-            }] : []
-          )}
-          keyExtractor={(item) => item.id}
-          style={styles.formList}
-          contentContainerStyle={styles.formContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => {
-            switch (item.type) {
-              case 'dropdown':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <TouchableOpacity
-                      style={styles.dropdownButton}
-                      onPress={item.onPress}
-                    >
-                      <Text style={[styles.dropdownButtonText, !item.value && styles.placeholderText]}>
-                        {item.value || item.placeholder}
-                      </Text>
-                      <Ionicons name="chevron-down" size={20} color="#666" />
-                    </TouchableOpacity>
-                  </View>
-                );
-              case 'paymentMethod':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <View style={styles.paymentMethodContainer}>
-                      {PAYMENT_METHODS.map((method) => (
-                        <TouchableOpacity
-                          key={method.id}
-                          style={[
-                            styles.paymentMethodButton,
-                            paymentMethod === method.id && styles.paymentMethodButtonActive
-                          ]}
-                          onPress={() => handlePaymentMethodChange(method.id as PaymentMethod)}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons 
-                            name={method.icon as any} 
-                            size={24} 
-                            color={paymentMethod === method.id ? '#4CAF50' : '#666'} 
-                          />
-                          <Text style={[
-                            styles.paymentMethodText,
-                            paymentMethod === method.id && styles.paymentMethodTextActive
-                          ]}>
-                            {method.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                );
-              case 'input':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <TextInput
-                      style={[
-                        item.id === 'amount' ? styles.amountInput : styles.textInput,
-                         item.id === 'place' && styles.placeInput
-                    ]}
-                      placeholder={item.placeholder}
-                      value={item.value}
-                      onChangeText={item.onChangeText}
-                      keyboardType={item.keyboardType}
-                      placeholderTextColor="#999"
-                      editable={item.editable !== false}
-                    />
-                  </View>
-                );
-              case 'textarea':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <TextInput
-                      style={[styles.textInput, styles.notesInput]}
-                      placeholder={item.placeholder}
-                      value={item.value}
-                      onChangeText={item.onChangeText}
-                      multiline
-                      numberOfLines={3}
-                      placeholderTextColor="#999"
-                      textAlignVertical="top"
-                    />
-                  </View>
-                );
-              case 'image':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <TouchableOpacity style={styles.imageButton} onPress={item.onPress}>
-                      {item.value ? (
-                        <Image source={{ uri: item.value }} style={styles.previewImage} />
-                      ) : (
-                        <View style={styles.imageButtonContent}>
-                          <Ionicons name="images-outline" size={32} color="#254892ff" />
-                          <Text style={styles.imageButtonText}>
-                            {paymentMethod === 'neft'
-                              ? 'Select NEFT Screenshot from Gallery'
-                              : 'Select Screenshot from Gallery'
-                            }
-                          </Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              case 'camera':
-                return (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>{item.label}</Text>
-                    <TouchableOpacity style={styles.imageButton} onPress={item.onPress}>
-                      {item.value ? (
-                        <Image source={{ uri: item.value }} style={styles.previewImage} />
-                      ) : (
-                        <View style={styles.imageButtonContent}>
-                          <Ionicons name="camera-outline" size={32} color="#666" />
-                          <Text style={styles.imageButtonText}>
-                            Take Photo of Cheque
-                          </Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              default:
-                return null;
-            }
-          }}
-          ListFooterComponent={() => (
-            <View style={styles.submitButtonContainer}>
-              <TouchableOpacity
-                style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>
-                    {editData ? 'Update Collection' : 'Add Collection'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-        />
-      </KeyboardAvoidingView>
+          {/* ── Section: Customer ── */}
+          <Text style={styles.sectionLabel}>COLLECTION INFO</Text>
 
-      <Modal
-        visible={showCustomerDropdown}
-        animationType="slide"
-        presentationStyle="fullScreen"
-      >
-        <SafeAreaView style={styles.fullScreenDropdownModal}>
-          <View style={styles.fullScreenDropdownHeader}>
-            <TouchableOpacity 
-              onPress={() => {
-                setShowCustomerDropdown(false);
-                setIsManualCustomerMode(false);
-                setManualCustomerName('');
-                setManualCustomerPlace('');
-              }}
-              style={styles.fullScreenBackButton}
-            >
-              <Ionicons name="arrow-back" size={24} color="#c63030ff" />
-            </TouchableOpacity>
-            <Text style={styles.fullScreenDropdownTitle}>
-              {isManualCustomerMode ? 'Add New Customer' : 'Select Customer'}
-            </Text>
+          {/* Customer selector */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Company <Text style={styles.required}>*</Text></Text>
             <TouchableOpacity
-              onPress={toggleManualCustomerMode}
-              style={styles.fullScreenBackButton}
+              style={styles.selector}
+              onPress={() => setShowCompanyDropdown(true)}
+              activeOpacity={0.8}
             >
-              <Ionicons 
-                name={isManualCustomerMode ? "list" : "person-add"} 
-                size={24} 
-                color="#4CAF50" 
-              />
+              <Text style={[styles.selectorText, !selectedCompany && styles.placeholderText]} numberOfLines={1}>
+                {selectedCompany ? selectedCompany.name : 'Select company'}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color="#A39A85" />
             </TouchableOpacity>
           </View>
 
-          {isManualCustomerMode ? (
-            <View style={styles.manualCustomerForm}>
-              <View style={styles.manualInputGroup}>
-                <Text style={styles.manualInputLabel}>Customer Name *</Text>
-                <TextInput
-                  style={styles.manualTextInput}
-                  placeholder="Enter customer name"
-                  value={manualCustomerName}
-                  onChangeText={setManualCustomerName}
-                  placeholderTextColor="#999"
-                  autoFocus
-                />
-              </View>
+          {/* Department */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Department <Text style={styles.required}>*</Text></Text>
+            <TouchableOpacity
+              style={[styles.selector, !selectedCompany && styles.selectorDisabled]}
+              onPress={() => selectedCompany && setShowBranchDropdown(true)}
+              activeOpacity={0.8}
+              disabled={!selectedCompany}
+            >
+              <Text style={[styles.selectorText, !selectedBranch && styles.placeholderText]} numberOfLines={1}>
+                {selectedBranch ? selectedBranch.name : (selectedCompany ? 'Select department' : 'Select company first')}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color="#A39A85" />
+            </TouchableOpacity>
+          </View>
 
-              <View style={styles.manualInputGroup}>
-                <Text style={styles.manualInputLabel}>Place</Text>
-                <TextInput
-                  style={styles.manualTextInput}
-                  placeholder="Enter place (optional)"
-                  value={manualCustomerPlace}
-                  onChangeText={setManualCustomerPlace}
-                  placeholderTextColor="#999"
-                />
-              </View>
+          {/* Client */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Client Name <Text style={styles.required}>*</Text></Text>
+            <TouchableOpacity
+              style={[styles.selector, (!selectedCompany || !selectedBranch) && styles.selectorDisabled]}
+              onPress={() => selectedCompany && selectedBranch && setShowCustomerDropdown(true)}
+              activeOpacity={0.8}
+              disabled={!selectedCompany || !selectedBranch}
+            >
+              <Text style={[styles.selectorText, !selectedCustomer && styles.placeholderText]} numberOfLines={1}>
+                {selectedCustomer ? selectedCustomer.name : (selectedBranch ? 'Select client' : 'Select department first')}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color="#A39A85" />
+            </TouchableOpacity>
+          </View>
 
-              <TouchableOpacity
-                style={styles.manualAddButton}
-                onPress={handleAddManualCustomer}
-              >
-                <Ionicons name="add-circle" size={24} color="#ffffff" />
-                <Text style={styles.manualAddButtonText}>Add Customer</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <View style={styles.fullScreenSearchContainer}>
-                <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-                <TextInput
-                  style={styles.fullScreenSearchInput}
-                  placeholder="Search customers..."
-                  value={customerSearchText}
-                  onChangeText={setCustomerSearchText}
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoFocus
-                />
-              </View>
-
-              <FlatList
-                data={filteredCustomers}
-                renderItem={renderCustomerItem}
-                keyExtractor={customerKeyExtractor}
-                style={styles.fullScreenDropdownList}
-                contentContainerStyle={styles.fullScreenDropdownContent}
-                showsVerticalScrollIndicator={true}
-                keyboardShouldPersistTaps="handled"
-                removeClippedSubviews={true}
-                maxToRenderPerBatch={10}
-                windowSize={5}
-                initialNumToRender={8}
-                ListEmptyComponent={
-                  <View style={styles.emptySearchContainer}>
-                    <Ionicons name="search-outline" size={48} color="#ccc" />
-                    <Text style={styles.emptySearchText}>No customers found</Text>
+          {/* Balance chip — shown after a client is selected */}
+          {selectedCustomer && selectedCustomer.balance !== undefined && !selectedCustomer.isManual && (() => {
+            const bal = selectedCustomer.balance ?? 0;
+            const balColor = bal > 0 ? '#16A34A' : bal < 0 ? '#DC2626' : '#A39A85';
+            const balLabel = bal > 0 ? 'Outstanding' : bal < 0 ? 'Advance' : 'Settled';
+            return (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: '#FFFFFF',
+                borderRadius: 12,
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+                marginBottom: 8,
+                borderWidth: 1,
+                borderColor: '#E8E3D9',
+              }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#7E7767' }}>Balance</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: balColor }}>
+                    ₹{Math.abs(bal).toFixed(2)}
+                  </Text>
+                  <View style={{
+                    backgroundColor: balColor + '20',
+                    borderRadius: 6,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                  }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: balColor }}>{balLabel}</Text>
                   </View>
-                }
-              />
-            </>
-          )}
-        </SafeAreaView>
-      </Modal>
+                </View>
+              </View>
+            );
+          })()}
 
-      <Modal
-        visible={showBranchDropdown}
-        animationType="slide"
-        presentationStyle="fullScreen"
-      >
-        <SafeAreaView style={styles.fullScreenDropdownModal}>
-          <View style={styles.fullScreenDropdownHeader}>
-            <TouchableOpacity 
-              onPress={() => setShowBranchDropdown(false)}
-              style={styles.fullScreenBackButton}
-            >
-              <Ionicons name="arrow-back" size={24} color="#333" />
-            </TouchableOpacity>
-            <Text style={styles.fullScreenDropdownTitle}>Select Branch</Text>
-            <View style={styles.fullScreenBackButton} />
-          </View>
+          {/* ── Section: Payment ── */}
+          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>PAYMENT DETAILS</Text>
 
-          <View style={styles.fullScreenSearchContainer}>
-            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+          {/* Place */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Place</Text>
             <TextInput
-              style={styles.fullScreenSearchInput}
-              placeholder="Search branches..."
-              value={branchSearchText}
-              onChangeText={setBranchSearchText}
-              placeholderTextColor="#999"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
+              style={styles.input}
+              placeholder="Client place"
+              placeholderTextColor="#A39A85"
+              value={selectedCustomerPlace}
+              onChangeText={setSelectedCustomerPlace}
             />
           </View>
 
-          {isFetchingBranches && branches.length === 0 ? (
-            <View style={styles.emptySearchContainer}>
-              <ActivityIndicator size="large" color="#4CAF50" />
-              <Text style={styles.emptySearchText}>Loading branches...</Text>
+          {/* Collection Type */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Collection Type <Text style={styles.required}>*</Text></Text>
+            <View style={styles.typeGrid}>
+              {COLLECTION_TYPES.map(ct => {
+                const active = collectionType === ct.id;
+                return (
+                  <TouchableOpacity
+                    key={ct.id}
+                    style={[styles.typeChip, active && styles.typeChipActive]}
+                    onPress={() => handleCollectionTypeChange(ct.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name={ct.icon as any} size={18} color={active ? '#1C1B17' : '#A39A85'} />
+                    <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>{ct.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-          ) : (
-            <FlatList
-              data={filteredBranches}
-              renderItem={renderBranchItem}
-              keyExtractor={branchKeyExtractor}
-              style={styles.fullScreenDropdownList}
-              contentContainerStyle={styles.fullScreenDropdownContent}
-              showsVerticalScrollIndicator={true}
-              keyboardShouldPersistTaps="handled"
-              removeClippedSubviews={true}
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              initialNumToRender={8}
-              ListEmptyComponent={
-                <View style={styles.emptySearchContainer}>
-                  <Ionicons name="search-outline" size={48} color="#ccc" />
-                  <Text style={styles.emptySearchText}>
-                    {branches.length === 0 ? 'No branches available. Please check your connection.' : 'No branches found'}
-                  </Text>
-                  {branches.length === 0 && branchFetchAttempts > 0 && (
-                    <Text style={styles.retryText}>
-                      Retrying... ({branchFetchAttempts}/{MAX_FETCH_ATTEMPTS})
-                    </Text>
+          </View>
+
+          {/* Amount */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Amount <Text style={styles.required}>*</Text></Text>
+            <View style={styles.amountRow}>
+              <View style={styles.amountPrefix}>
+                <Text style={styles.amountPrefixText}>₹</Text>
+              </View>
+              <TextInput
+                style={styles.amountInput}
+                placeholder="0.00"
+                placeholderTextColor="#A39A85"
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
+
+          {/* Paid For */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Paid For (Optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Invoice #1023"
+              placeholderTextColor="#A39A85"
+              value={paidFor}
+              onChangeText={setPaidFor}
+            />
+          </View>
+
+          {/* Notes */}
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Notes</Text>
+            <TextInput
+              style={[styles.input, styles.textarea]}
+              placeholder="Additional notes (optional)"
+              placeholderTextColor="#A39A85"
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+          </View>
+
+          {/* ── Payment Proof ── */}
+          {requiresProof && (
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>
+                Payment Proof <Text style={styles.required}>*</Text>
+              </Text>
+              <Text style={styles.fieldHint}>
+                {collectionType === 'cheque' ? 'Take a clear photo of the cheque.' : 'Upload a screenshot of the transfer.'}
+              </Text>
+
+              {screenshot ? (
+                <View style={styles.proofPreviewWrap}>
+                  <Image source={{ uri: screenshot }} style={styles.proofPreview} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={styles.proofRemoveBtn}
+                    onPress={() => { setScreenshot(null); setPaymentProofAsset(null); }}
+                  >
+                    <Ionicons name="close-circle" size={28} color="#E0763C" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.proofButtonRow}>
+                  {collectionType === 'cheque' ? (
+                    <TouchableOpacity style={styles.proofButton} onPress={takePhoto} activeOpacity={0.8}>
+                      <Ionicons name="camera-outline" size={24} color="#1C1B17" />
+                      <Text style={styles.proofButtonText}>Take Photo</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <TouchableOpacity style={styles.proofButton} onPress={pickImage} activeOpacity={0.8}>
+                        <Ionicons name="images-outline" size={24} color="#1C1B17" />
+                        <Text style={styles.proofButtonText}>Gallery</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.proofButton} onPress={takePhoto} activeOpacity={0.8}>
+                        <Ionicons name="camera-outline" size={24} color="#1C1B17" />
+                        <Text style={styles.proofButtonText}>Camera</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </View>
-              }
-            />
+              )}
+            </View>
           )}
-        </SafeAreaView>
-      </Modal>
 
+          {/* Submit */}
+          <TouchableOpacity
+            style={[styles.submitBtn, loading && { opacity: 0.6 }]}
+            onPress={handleSubmit}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#1C1B17" />
+            ) : (
+              <Text style={styles.submitBtnText}>{editData ? 'Update Collection' : 'Add Collection'}</Text>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* ── Success overlay ── */}
       {showSuccessCard && (
-        <View style={styles.successCard}>
-          <View style={styles.successCardContent}>
-            <Ionicons name="checkmark-circle" size={24} color="#f1f5f1ff" />
-            <Text style={styles.successCardText}>
-              Collection {editData ? 'updated' : 'added'} successfully!
-            </Text>
-            <TouchableOpacity 
-              onPress={() => setShowSuccessCard(false)}
-              style={styles.successCardClose}
-            >
-              <Ionicons name="close" size={20} color="#f9f6f6ff" />
-            </TouchableOpacity>
+        <View style={styles.successOverlay} pointerEvents="none">
+          <View style={styles.successCard}>
+            <View style={styles.successIcon}>
+              <Ionicons name="checkmark" size={28} color="#1C1B17" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.successTitle}>Collection Added!</Text>
+              <Text style={styles.successSub}>Record saved successfully.</Text>
+            </View>
           </View>
         </View>
       )}
 
+      {/* Full-screen loader */}
       {loading && (
-        <View style={styles.centeredLoader}>
-          <View style={styles.loaderBackground}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.loaderText}>Processing...</Text>
+        <View style={styles.fullLoader}>
+          <View style={styles.fullLoaderCard}>
+            <ActivityIndicator size="large" color="#F5C451" />
+            <Text style={styles.fullLoaderText}>Submitting…</Text>
           </View>
         </View>
       )}
+
+      {/* ── Customer Dropdown Modal ── */}
+    <Modal visible={showCompanyDropdown} animationType="slide" presentationStyle="fullScreen">
+  <SafeAreaView style={styles.modalRoot}>
+    <View style={styles.modalHeader}>
+      <TouchableOpacity style={styles.modalBackBtn} onPress={() => setShowCompanyDropdown(false)}>
+        <Ionicons name="arrow-back" size={22} color="#1C1B17" />
+      </TouchableOpacity>
+      <Text style={styles.modalTitle}>Select Company</Text>
+      <View style={{ width: 44 }} />
+    </View>
+
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={18} color="#A39A85" style={{ marginRight: 10 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search companies..."
+          placeholderTextColor="#A39A85"
+          value={companySearchText}
+          onChangeText={setCompanySearchText}
+          autoFocus
+        />
+        {companySearchText.length > 0 && (
+          <TouchableOpacity onPress={() => setCompanySearchText('')}>
+            <Ionicons name="close-circle" size={18} color="#A39A85" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <FlatList
+        data={filteredCompanies}
+        keyExtractor={item => item.id}
+        renderItem={renderCompanyItem}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons name="business-outline" size={40} color="#D4A574" />
+            <Text style={styles.emptyStateText}>No companies found</Text>
+          </View>
+        }
+      />
+    </KeyboardAvoidingView>
+  </SafeAreaView>
+</Modal>
+
+      <Modal visible={showCustomerDropdown} animationType="slide" presentationStyle="fullScreen">
+  <SafeAreaView style={styles.modalRoot}>
+    <View style={styles.modalHeader}>
+      <TouchableOpacity
+        style={styles.modalBackBtn}
+        onPress={() => {
+          setShowCustomerDropdown(false);
+          setIsManualCustomerMode(false);
+          setManualCustomerName('');
+          setManualCustomerPlace('');
+        }}
+      >
+        <Ionicons name="arrow-back" size={22} color="#1C1B17" />
+      </TouchableOpacity>
+      <Text style={styles.modalTitle}>
+        Select Client
+      </Text>
+      <View style={{ width: 44 }} />
+    </View>
+
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      {isManualCustomerMode ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.manualForm} keyboardShouldPersistTaps="handled">
+          <Text style={styles.fieldLabel}>Customer Name <Text style={styles.required}>*</Text></Text>
+          <TextInput
+            style={[styles.input, { marginBottom: 16 }]}
+            placeholder="Enter customer name"
+            placeholderTextColor="#A39A85"
+            value={manualCustomerName}
+            onChangeText={setManualCustomerName}
+            autoFocus
+          />
+          <Text style={styles.fieldLabel}>Place</Text>
+          <TextInput
+            style={[styles.input, { marginBottom: 24 }]}
+            placeholder="Enter place (optional)"
+            placeholderTextColor="#A39A85"
+            value={manualCustomerPlace}
+            onChangeText={setManualCustomerPlace}
+          />
+          <TouchableOpacity style={styles.submitBtn} onPress={handleAddManualCustomer} activeOpacity={0.85}>
+            <Text style={styles.submitBtnText}>Add Customer</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color="#A39A85" style={{ marginRight: 10 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search customers…"
+              placeholderTextColor="#A39A85"
+              value={customerSearchText}
+              onChangeText={setCustomerSearchText}
+              autoFocus
+            />
+            {customerSearchText.length > 0 && (
+              <TouchableOpacity onPress={() => setCustomerSearchText('')}>
+                <Ionicons name="close-circle" size={18} color="#A39A85" />
+              </TouchableOpacity>
+            )}
+          </View>
+          <FlatList
+            data={filteredCustomers}
+            keyExtractor={item => item.id}
+            renderItem={renderCustomerItem}
+            contentContainerStyle={{ paddingBottom: 24 }}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={40} color="#D4A574" />
+                <Text style={styles.emptyStateText}>No customers found</Text>
+              </View>
+            }
+          />
+        </>
+      )}
+    </KeyboardAvoidingView>
+  </SafeAreaView>
+</Modal>
+
+     <Modal visible={showBranchDropdown} animationType="slide" presentationStyle="fullScreen">
+  <SafeAreaView style={styles.modalRoot}>
+    <View style={styles.modalHeader}>
+      <TouchableOpacity style={styles.modalBackBtn} onPress={() => setShowBranchDropdown(false)}>
+        <Ionicons name="arrow-back" size={22} color="#1C1B17" />
+      </TouchableOpacity>
+      <Text style={styles.modalTitle}>Select Department</Text>
+      <View style={{ width: 44 }} />
+    </View>
+
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={18} color="#A39A85" style={{ marginRight: 10 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search departments…"
+          placeholderTextColor="#A39A85"
+          value={branchSearchText}
+          onChangeText={setBranchSearchText}
+          autoFocus
+        />
+        {branchSearchText.length > 0 && (
+          <TouchableOpacity onPress={() => setBranchSearchText('')}>
+            <Ionicons name="close-circle" size={18} color="#A39A85" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <FlatList
+        data={filteredBranches}
+        keyExtractor={item => item.id}
+        renderItem={renderBranchItem}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons name="business-outline" size={40} color="#D4A574" />
+            <Text style={styles.emptyStateText}>
+              {isFetchingBranches ? 'Loading departments…' : 'No departments found'}
+            </Text>
+          </View>
+        }
+      />
+    </KeyboardAvoidingView>
+  </SafeAreaView>
+</Modal>
     </View>
   );
 }
 
+/* ─────────────────────────── Styles ─────────────────────────── */
 const styles = StyleSheet.create({
-  fullPageModal: {
+  root: {
     flex: 1,
     backgroundColor: '#FAF9F6',
   },
-  fullPageHeader: {
+
+  /* Init loader */
+  initLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAF9F6',
+  },
+  initLoaderText: {
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#7E7767',
+  },
+
+  /* Header */
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 16,
-    backgroundColor: 'rgba(250, 249, 246, 0.8)',
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 14,
+    backgroundColor: '#FAF9F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0EAD8',
   },
-  modalCloseButton: {
+  backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#FEF8E7',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  fullPageTitle: {
-    fontSize: 20,
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: -0.3,
+  },
+
+  /* Scroll */
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 48,
+  },
+
+  /* Section label */
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A39A85',
+    letterSpacing: 1.4,
+    marginBottom: 14,
+  },
+
+  /* Field */
+  field: {
+    marginBottom: 18,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1C1B17',
+    marginBottom: 8,
+  },
+  fieldHint: {
+    fontSize: 12,
+    color: '#A39A85',
+    marginBottom: 10,
+    fontWeight: '500',
+  },
+  required: {
+    color: '#E0763C',
+  },
+
+  /* Text input */
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1B17',
+  },
+  textarea: {
+    height: 90,
+    paddingTop: 14,
+  },
+
+  /* Selector (dropdown trigger) */
+  selector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  selectorDisabled: {
+    opacity: 0.55,
+  },
+  selectorText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1B17',
+    marginRight: 8,
+  },
+  placeholderText: {
+    color: '#A39A85',
+    fontWeight: '500',
+  },
+
+  /* Collection type chips */
+  typeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  typeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 50,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
+  },
+  typeChipActive: {
+    backgroundColor: '#F5C451',
+    borderColor: '#F5C451',
+  },
+  typeChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#A39A85',
+  },
+  typeChipTextActive: {
+    color: '#1C1B17',
+  },
+
+  /* Amount input */
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  amountPrefix: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#F0EAD8',
+    borderRightWidth: 1.5,
+    borderRightColor: '#E8E3D9',
+  },
+  amountPrefixText: {
+    fontSize: 17,
     fontWeight: '800',
     color: '#1C1B17',
   },
-  fullPageContent: {
+  amountInput: {
     flex: 1,
-  },
-  formList: {
-    flex: 1,
-  },
-  formContent: {
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 100,
-  },
-  inputGroup: {
-    marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 17,
     fontWeight: '700',
-    color: '#7E7767',
-    marginBottom: 10,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
+    color: '#1C1B17',
   },
-  paymentMethodContainer: {
+
+  /* Payment proof */
+  proofButtonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     gap: 12,
   },
-  paymentMethodButton: {
+  proofButton: {
     flex: 1,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
     paddingVertical: 20,
-    paddingHorizontal: 12,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  paymentMethodButtonActive: {
-    borderColor: '#D4A574',
-    borderWidth: 2,
-    backgroundColor: '#FEF8E7',
-    shadowColor: '#D4A574',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  paymentMethodText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#7E7767',
-  },
-  paymentMethodTextActive: {
-    color: '#1C1B17',
-    fontWeight: '700',
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  dropdownButtonText: {
-    fontSize: 15,
-    color: '#1C1B17',
-    fontWeight: '600',
-    flex: 1,
-  },
-  placeholderText: {
-    color: '#7E7767',
-    fontWeight: '500',
-  },
-  textInput: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 15,
-    color: '#1C1B17',
-    fontWeight: '600',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  notesInput: {
-    minHeight: 120,
-    textAlignVertical: 'top',
-  },
-  placeInput: {
-    backgroundColor: '#FFFFFF',
-  },
-  customerItemContainer: {
-    flex: 1,
-  },
-  customerNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  customerNameText: {
-    fontSize: 16,
-    color: '#1C1B17',
-    fontWeight: '700',
-    flex: 1,
-  },
-  manualBadge: {
-    backgroundColor: '#D4A574',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  manualBadgeText: {
-    color: '#1C1B17',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  customerPlaceText: {
-    fontSize: 13,
-    color: '#7E7767',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  amountInput: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 18,
-    color: '#1C1B17',
-    fontWeight: '700',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  imageButton: {
-    borderWidth: 2,
-    borderColor: '#D4A574',
     borderStyle: 'dashed',
+  },
+  proofButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+  proofPreviewWrap: {
     borderRadius: 16,
-    height: 140,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FEF8E7',
+    overflow: 'hidden',
+    height: 200,
+    position: 'relative',
   },
-  imageButtonContent: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  imageButtonText: {
-    fontSize: 14,
-    color: '#7E7767',
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  previewImage: {
+  proofPreview: {
     width: '100%',
     height: '100%',
+  },
+  proofRemoveBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: '#FFFFFF',
     borderRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  submitButtonContainer: {
-    marginTop: 32,
-    marginBottom: 20,
-  },
-  submitButton: {
+
+  /* Submit button */
+  submitBtn: {
+    marginTop: 12,
     backgroundColor: '#1C1B17',
     borderRadius: 50,
-    paddingVertical: 20,
+    paddingVertical: 18,
     alignItems: 'center',
     shadowColor: '#1C1B17',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 8,
   },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
+  submitBtnText: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#F5C451',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
-  manualCustomerForm: {
-    padding: 20,
-  },
-  manualInputGroup: {
-    marginBottom: 20,
-  },
-  manualInputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#7E7767',
-    marginBottom: 10,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  manualTextInput: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 15,
-    color: '#1C1B17',
-    fontWeight: '600',
-  },
-  manualAddButton: {
-    flexDirection: 'row',
-    backgroundColor: '#D4A574',
-    borderRadius: 50,
-    paddingVertical: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginTop: 20,
-    shadowColor: '#D4A574',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  manualAddButtonText: {
-    color: '#1C1B17',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  fullScreenDropdownModal: {
-    flex: 1,
-    backgroundColor: '#FAF9F6',
-  },
-  fullScreenDropdownHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderBottomWidth: 0,
-    backgroundColor: 'rgba(250, 249, 246, 0.8)',
-  },
-  fullScreenBackButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FEF8E7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  fullScreenDropdownTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1C1B17',
-  },
-  fullScreenSearchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 24,
-    marginVertical: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 50,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  searchIcon: {
-    marginRight: 12,
-  },
-  fullScreenSearchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1C1B17',
-    fontWeight: '600',
-    padding: 0,
-  },
-  fullScreenDropdownList: {
-    flex: 1,
-  },
-  fullScreenDropdownContent: {
-    paddingBottom: 20,
-  },
-  emptySearchContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptySearchText: {
-    fontSize: 16,
-    color: '#7E7767',
-    marginTop: 12,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-    fontWeight: '600',
-  },
-  retryText: {
-    fontSize: 14,
-    color: '#D4A574',
-    marginTop: 8,
-    textAlign: 'center',
-    fontWeight: '700',
-  },
-  dropdownItem: {
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    marginHorizontal: 24,
-    marginBottom: 8,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  dropdownItemText: {
-    fontSize: 16,
-    color: '#1C1B17',
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    backgroundColor: '#FAF9F6',
-  },
-  loadingText: {
-    color: '#1C1B17',
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  centeredLoader: {
+
+  /* Success overlay */
+  successOverlay: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    bottom: 40,
+    left: 24,
+    right: 24,
+  },
+  successCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1B17',
+    borderRadius: 20,
+    padding: 20,
+    gap: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  successIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F5C451',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  successTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#F5C451',
+  },
+  successSub: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#A39A85',
+    marginTop: 2,
+  },
+
+  /* Full loader */
+  fullLoader: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(28,27,23,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
     zIndex: 9999,
   },
-  loaderBackground: {
+  fullLoaderCard: {
     backgroundColor: '#FFFFFF',
-    padding: 32,
     borderRadius: 24,
+    padding: 32,
     alignItems: 'center',
-    justifyContent: 'center',
     minWidth: 160,
-    minHeight: 160,
+    gap: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
     shadowRadius: 24,
     elevation: 12,
   },
-  loaderText: {
-    marginTop: 16,
-    fontSize: 16,
+  fullLoaderText: {
+    fontSize: 15,
     fontWeight: '700',
     color: '#1C1B17',
   },
-  successCard: {
-    position: 'absolute',
-    top: '50%',
-    left: 24,
-    right: 24,
-    backgroundColor: '#1C1B17',
-    borderRadius: 24,
-    padding: 24,
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    zIndex: 9999,
-    transform: [{ translateY: -50 }],
+
+  /* Modal */
+  modalRoot: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
   },
-  successCardContent: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0EAD8',
+    backgroundColor: '#FAF9F6',
   },
-  successCardText: {
+  modalBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1C1B17',
+    letterSpacing: -0.2,
+  },
+
+  /* Search bar */
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    borderWidth: 1.5,
+    borderColor: '#E8E3D9',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  searchInput: {
     flex: 1,
-    marginLeft: 16,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F5C451',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1B17',
+    padding: 0,
   },
-  successCardClose: {
-    padding: 4,
+
+  /* Dropdown items */
+  dropdownItem: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  dropdownItemTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+  dropdownItemSub: {
+    fontSize: 12,
+    color: '#A39A85',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+
+  /* Manual badge */
+  manualBadge: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  manualBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+
+  /* Empty state */
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    gap: 12,
+  },
+  emptyStateText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#A39A85',
+  },
+
+  /* Manual form */
+  manualForm: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 48,
   },
 });

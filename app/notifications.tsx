@@ -2,9 +2,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,7 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 
 interface Notification {
   id: string;
@@ -28,127 +26,9 @@ export default function Notifications() {
   const [refreshing, setRefreshing] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const formatTime = (timeString: string) => {
-    try {
-      const date = new Date(timeString);
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-    } catch {
-      return timeString;
-    }
-  };
-
-  const checkTimeAndAddNotifications = async () => {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    const currentTime = hours * 60 + minutes;
-    const punchInTime = 9 * 60 + 30;
-    const punchOutTime = 18 * 60;
-    const newNotifications: Notification[] = [];
-
-    const userId = await SecureStore.getItemAsync('userId');
-    const password = await SecureStore.getItemAsync('password');
-    let punchData = null;
-
-    if (userId && password) {
-      try {
-        const month = new Date().getMonth() + 1;
-        const year = new Date().getFullYear();
-        const todayDate = new Date().toISOString().split('T')[0];
-        const response = await fetch(
-          `https://myimc.in/flutter/attendance/monthly/?userid=${userId}&password=${password}&month=${month}&year=${year}`
-        );
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            const todayRecord = data.attendance_records.find((r: any) => r.date === todayDate);
-            if (todayRecord) punchData = { punchIn: todayRecord.punch_in, punchOut: todayRecord.punch_out };
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching punch data:', error);
-      }
-    }
-
-    const currentTimestamp = now.getTime();
-    const twentyFourHoursAgo = currentTimestamp - (24 * 60 * 60 * 1000);
-
-    if (punchData?.punchIn) {
-      const punchInTime = new Date(punchData.punchIn).getTime();
-      if (punchInTime > twentyFourHoursAgo) {
-        newNotifications.push({
-          id: 'punch-in-success',
-          title: 'Punch In Successful',
-          message: `Good! You punched in at ${formatTime(punchData.punchIn)}`,
-          time: punchData.punchIn,
-          read: false,
-          type: 'success',
-        });
-      }
-    } else if (currentTime < punchInTime) {
-      newNotifications.push({
-        id: 'punch-in-reminder',
-        title: 'Punch In Reminder',
-        message: "Don't forget to punch in at 9:30 AM",
-        time: new Date().toISOString(),
-        read: false,
-        type: 'warning',
-      });
-    } else {
-      newNotifications.push({
-        id: 'punch-in-alert',
-        title: 'Punch In Alert',
-        message: "It's past 9:30 AM! Please punch in now.",
-        time: new Date().toISOString(),
-        read: false,
-        type: 'error',
-      });
-      Alert.alert('Punch In Alert', "It's past 9:30 AM! Don't forget to punch in.", [{ text: 'OK' }]);
-    }
-
-    if (punchData?.punchOut) {
-      const punchOutTime = new Date(punchData.punchOut).getTime();
-      if (punchOutTime > twentyFourHoursAgo) {
-        newNotifications.push({
-          id: 'punch-out-success',
-          title: 'Punch Out Successful',
-          message: `Good! You punched out at ${formatTime(punchData.punchOut)}`,
-          time: punchData.punchOut,
-          read: false,
-          type: 'success',
-        });
-      }
-    } else if (currentTime < punchOutTime) {
-      newNotifications.push({
-        id: 'punch-out-reminder',
-        title: 'Punch Out Reminder',
-        message: "Don't forget to punch out at 6:00 PM",
-        time: new Date().toISOString(),
-        read: false,
-        type: 'warning',
-      });
-    } else {
-      newNotifications.push({
-        id: 'punch-out-alert',
-        title: 'Punch Out Alert',
-        message: "It's past 6:00 PM! Please punch out now.",
-        time: new Date().toISOString(),
-        read: false,
-        type: 'error',
-      });
-      Alert.alert('Punch Out Alert', "It's past 6:00 PM! Don't forget to punch out.", [{ text: 'OK' }]);
-    }
-
-    setNotifications(newNotifications);
-  };
-
-  useEffect(() => {
-    checkTimeAndAddNotifications();
-  }, []);
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await new Promise((res) => setTimeout(res, 1000));
+    setNotifications([]);
     setRefreshing(false);
   };
 

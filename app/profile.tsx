@@ -83,7 +83,7 @@ export default function Profile() {
     console.log('User ID:', userCredentials.userId);
     
     try {
-      const response = await fetch('https://myimc.in/flutter/users/', {
+      const response = await fetch('https://my.myimc.in/flutter/users/', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

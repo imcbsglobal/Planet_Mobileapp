@@ -1,10 +1,9 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as SecureStore from 'expo-secure-store';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -13,15 +12,19 @@ import {
   Image,
   Modal,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
+
+/* ─────────────────────────── Types ─────────────────────────── */
 
 interface UserCredentials {
   userId: string;
   password: string;
+  username?: string;
 }
 
 interface Customer {
@@ -37,1312 +40,1245 @@ interface Branch {
   code?: string;
 }
 
+// Matches API collection_type values exactly
+type CollectionType = 'upi' | 'cash' | 'cheque' | 'neft' | 'bank_transfer';
+
 interface CollectionEntry {
   id: string;
   customerId: string;
   customerName: string;
   customerPlace?: string;
+  company?: string;
   branchId: string;
   branchName: string;
+  collectionType: CollectionType;
+  collectionTypeDisplay?: string;
   amount: string;
+  paidFor?: string;
   notes?: string;
-  screenshot: string | null;
+  paymentProofUrl: string | null;
+  status: string;
   createdAt: string;
-  paymentMethod?: 'UPI' | 'cash' | 'cheque' | 'neft';
-  userName?: string;
+  createdByName?: string;
+  createdById?: string;
 }
 
-type PaymentMethod = 'UPI' | 'cash' | 'cheque' | 'neft';
+/* ─────────────────────────── Constants ─────────────────────── */
 
-const API_BASE_URL = 'https://myimc.in/app4/api';
-const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-
-const CARD_COLORS = [
-  '#FFFFFF',
-  '#FFFFFF',
+const API_BASE_URL = 'https://my.myimc.in/app4/api';
+const COLLECTION_API_CANDIDATES = [
+  'https://my.myimc.in/collection/collections/api/list/',
+  'https://my.myimc.in/app4/api/collections/',
+  'https://my.myimc.in/collection/api/collections/',
+  'https://my.myimc.in/collection/collections/',
 ];
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+const COLLECTION_TYPE_CONFIG: Record<CollectionType, { label: string; bg: string; text: string; icon: string }> = {
+  upi:           { label: 'UPI',           bg: '#DCFCE7', text: '#15803D', icon: 'logo-google' },
+  cash:          { label: 'Cash',          bg: '#FEF9C3', text: '#A16207', icon: 'cash-outline' },
+  cheque:        { label: 'Cheque',        bg: '#EDE9FE', text: '#6D28D9', icon: 'document-text-outline' },
+  neft:          { label: 'NEFT',          bg: '#FFE4E6', text: '#BE123C', icon: 'card-outline' },
+  bank_transfer: { label: 'Bank Transfer', bg: '#DBEAFE', text: '#1D4ED8', icon: 'business-outline' },
+};
+
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
+  pending:  { label: 'Pending',  bg: '#FEF9C3', text: '#A16207' },
+  approved: { label: 'Approved', bg: '#DCFCE7', text: '#15803D' },
+  rejected: { label: 'Rejected', bg: '#FFE4E6', text: '#BE123C' },
+};
+
+/* ─────────────────────────── Component ─────────────────────── */
 
 export default function Collection() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
 
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [userCredentials, setUserCredentials] = useState<UserCredentials | null>(null);
-  const [isLoadingData, setIsLoadingData] = useState(false);
-  
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [collections, setCollections] = useState<CollectionEntry[]>([]);
-  
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
+  const [isInitializing, setIsInitializing]             = useState(true);
+  const [refreshing, setRefreshing]                     = useState(false);
+  const [userCredentials, setUserCredentials]           = useState<UserCredentials | null>(null);
   const [isLoadingCollections, setIsLoadingCollections] = useState(true);
-  
-  // Animation values for loading dots
-  const dot1Anim = useRef(new Animated.Value(0)).current;
-  const dot2Anim = useRef(new Animated.Value(0)).current;
-  const dot3Anim = useRef(new Animated.Value(0)).current;
 
-  // Initialize user credentials
-  const initializeUser = async () => {
-    try {
-      const [userId, password] = await Promise.all([
-        SecureStore.getItemAsync('userId'),
-        SecureStore.getItemAsync('password'),
-      ]);
+  const [customers, setCustomers]   = useState<Customer[]>([]);
+  const [branches, setBranches]     = useState<Branch[]>([]);
+  const [collections, setCollections] = useState<CollectionEntry[]>([]);
 
-      if (userId && password) {
-        console.log('User credentials initialized:', userId);
-        setUserCredentials({ userId, password });
-        return true;
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImage, setSelectedImage]   = useState<string | null>(null);
+  const [imageErrors, setImageErrors]       = useState<Set<string>>(new Set());
+
+  const [showDetailsModal, setShowDetailsModal]     = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<CollectionEntry | null>(null);
+
+  // Animated loading dots
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  /* ── API helper ── */
+  const makeAPICall = async (
+    endpoint: string,
+    method = 'GET',
+    body: any = null,
+    isFormData = false,
+    creds?: UserCredentials,
+  ) => {
+    const activeCreds = creds ?? userCredentials;
+    if (!activeCreds) throw new Error('User credentials not available');
+
+    const config: RequestInit = {
+      method,
+      headers: {
+        Authorization: `Basic ${btoa(`${activeCreds.userId}:${activeCreds.password}`)}`,
+      },
+      credentials: 'include',
+    };
+
+    if (body && method !== 'GET') {
+      if (isFormData) {
+        config.body = body;
       } else {
-        navigation.replace('Login');
-        return false;
+        (config.headers as any)['Content-Type'] = 'application/json';
+        config.body = JSON.stringify(body);
       }
-    } catch (error) {
-      console.error('Error initializing user:', error);
-      navigation.replace('Login');
-      return false;
     }
+
+    const response     = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    const responseText = await response.text();
+
+    if (responseText.trim().startsWith('<!DOCTYPE html') || responseText.trim().startsWith('<html')) {
+      throw new Error('Authentication failed');
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${responseText}`);
+
+    try { return JSON.parse(responseText); }
+    catch { throw new Error('Invalid JSON response from server'); }
   };
 
-  // API call helper with improved error handling
-  const makeAPICall = async (endpoint: string, method: string = 'GET', body: any = null, isFormData: boolean = false) => {
+  /* ── Customers ── */
+  const loadManualCustomers = async (userId: string): Promise<Customer[]> => {
     try {
-      if (!userCredentials) {
-        throw new Error('User credentials not available');
-      }
-
-      const config: RequestInit = {
-        method,
-        headers: {
-          'Authorization': `Basic ${btoa(`${userCredentials.userId}:${userCredentials.password}`)}`,
-        },
-        credentials: 'include', // IMPORTANT: Include cookies
-      };
-
-      if (body && method !== 'GET') {
-        if (isFormData) {
-          config.body = body;
-        } else {
-          config.headers = {
-            ...config.headers,
-            'Content-Type': 'application/json',
-          };
-          config.body = JSON.stringify(body);
-        }
-      }
-
-      console.log(`📡 Making API call to: ${API_BASE_URL}${endpoint}`);
-      console.log(`📡 Method: ${method}`);
-      console.log(`📡 Auth: ${userCredentials.userId}`);
-      
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-      
-      console.log(`📡 Response status: ${response.status}`);
-      console.log(`📡 Response Content-Type:`, response.headers.get('content-type'));
-      
-      // Get raw response text first
-      const responseText = await response.text();
-      console.log(`📡 Raw response (first 500 chars):`, responseText.substring(0, 500));
-      
-      // Check if response is HTML (login page)
-      if (responseText.trim().startsWith('<!DOCTYPE html') || responseText.trim().startsWith('<html')) {
-        console.error('❌ Received HTML instead of JSON - Authentication failed or session expired');
-        throw new Error('Authentication failed - received login page instead of data');
-      }
-      
-      if (response.status === 404) {
-        throw new Error(`Endpoint not found: ${endpoint}`);
-      }
-      
-      if (!response.ok) {
-        console.error(`❌ API Error Response: ${responseText}`);
-        throw new Error(`HTTP error! status: ${response.status}, message: ${responseText}`);
-      }
-
-      // Try to parse JSON
-      try {
-        const result = JSON.parse(responseText);
-        console.log(`✅ API Response received and parsed successfully`);
-        return result;
-      } catch (parseError) {
-        console.error('❌ JSON Parse Error. Response was:', responseText.substring(0, 1000));
-        throw new Error(`Invalid JSON response from server. Got: ${responseText.substring(0, 100)}`);
-      }
-    } catch (error: any) {
-      console.error(`❌ API call failed for ${endpoint}:`, error);
-      throw error;
-    }
+      const raw = await AsyncStorage.getItem(`manual_customers_${userId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
   };
 
-  // Load manual customers from storage
-  const loadManualCustomers = async () => {
-    try {
-      if (!userCredentials?.userId) return [];
-      
-      const storageKey = `manual_customers_${userCredentials.userId}`;
-      const storedManualCustomers = await AsyncStorage.getItem(storageKey);
-      
-      if (storedManualCustomers) {
-        return JSON.parse(storedManualCustomers);
-      }
-      return [];
-    } catch (error) {
-      console.error('Error loading manual customers:', error);
-      return [];
-    }
-  };
+  // Wider net of possible field names the /clients API might use for a place/location
+  const formatCustomer = (c: any, i: number): Customer => ({
+    id:       c.code || c.id?.toString() || i.toString(),
+    name:     c.name,
+    place:    c.place || c.location || c.address || c.city || c.town ||
+              c.district || c.area || c.branch_place || '',
+    isManual: false,
+  });
 
-  // Fetch customers
-  const fetchCustomers = async () => {
+  const fetchCustomers = async (creds: UserCredentials) => {
     try {
-      const response = await makeAPICall('/clients');
-      
-      if (response && Array.isArray(response)) {
-        const formattedCustomers: Customer[] = response.map((customer: any, index: number) => ({
-          id: customer.code || customer.id?.toString() || index.toString(),
-          name: customer.name,
-          place: customer.place || customer.location || customer.address || customer.address3 || '',
-          isManual: false,
-        }));
-        
-        const manualCustomers = await loadManualCustomers();
-        const allCustomers = [...formattedCustomers, ...manualCustomers];
-        
-        setCustomers(prevCustomers => {
-          if (JSON.stringify(prevCustomers) === JSON.stringify(allCustomers)) {
-            return prevCustomers;
+      const cached = await AsyncStorage.getItem('cached_customers');
+      const manual = await loadManualCustomers(creds.userId);
+      if (cached) {
+        setCustomers([...JSON.parse(cached), ...manual]);
+        // refresh in background silently
+        makeAPICall('/clients', 'GET', null, false, creds).then((res: any) => {
+          if (res && Array.isArray(res)) {
+            const formatted: Customer[] = res.map(formatCustomer);
+            setCustomers([...formatted, ...manual]);
+            AsyncStorage.setItem('cached_customers', JSON.stringify(formatted));
           }
-          return allCustomers;
-        });
-        
-        await AsyncStorage.setItem('cached_customers', JSON.stringify(formattedCustomers));
+        }).catch(() => {});
         return;
       }
-    } catch (error) {
-      console.log('Error fetching customers, using cache/mock:', error);
-    }
-    
-    await loadCustomersFromCache();
-  };
-
-  // Load customers from cache
-  const loadCustomersFromCache = async () => {
-    try {
-      const cachedCustomers = await AsyncStorage.getItem('cached_customers');
-      const manualCustomers = await loadManualCustomers();
-      
-      if (cachedCustomers) {
-        const parsed = JSON.parse(cachedCustomers);
-        setCustomers([...parsed, ...manualCustomers]);
-        return;
-      }
-    } catch (cacheError) {
-      console.log('No cached customers found');
-    }
-    
-    const mockCustomers: Customer[] = [
-      { id: 'IN', name: 'ICON RESIDENCY', place: 'OOTY ROAD MEPPADI', isManual: false },
-      { id: 'IM128', name: 'INDO SPICES & PULSES', place: 'HUNSOOR (RITS Wayanad)', isManual: false },
-      { id: 'IM131', name: 'HITLER MENS WEAR', place: 'SULTHAN BATHERY', isManual: false },
-      { id: 'IM132', name: 'HIGHNESS GRILLS RESTAURANT', place: 'KALPETTA', isManual: false },
-      { id: 'IM133', name: 'FAMILY HYPERMART MUKKAM', place: 'MUKKAM', isManual: false },
-      { id: 'IM134', name: 'LOYAL ENTERPRISES', place: 'KOZHIKODE', isManual: false },
-      { id: 'IM135', name: 'CV SUPERMARKET', place: 'WAYANAD', isManual: false },
-    ];
-    
-    const manualCustomers = await loadManualCustomers();
-    setCustomers([...mockCustomers, ...manualCustomers]);
-    await AsyncStorage.setItem('cached_customers', JSON.stringify(mockCustomers));
-  };
-
-  // Fetch branches from API
-  const fetchBranches = async () => {
-    try {
-      console.log('=== FETCHING BRANCHES ===');
-      
-      if (!userCredentials) {
-        console.log('User credentials not available, using cache');
-        await loadBranchesFromCache();
-        return;
-      }
-      
-      const response = await makeAPICall('/departments');
-      
-      // Handle response with data array
-      let branchesData: any[] = [];
-      
-      if (response && response.data && Array.isArray(response.data)) {
-        branchesData = response.data;
-      } else if (response && Array.isArray(response)) {
-        branchesData = response;
-      }
-      
-      if (branchesData.length > 0) {
-        console.log('Branches API response count:', branchesData.length);
-        
-        const formattedBranches: Branch[] = branchesData.map((branch: any, index: number) => ({
-          id: branch.id?.toString() || index.toString(),
-          name: branch.name || branch.department_name || branch.dept_name || 'Unknown Branch',
-          code: branch.code || branch.dept_code || '',
-        }));
-        
-        console.log('Formatted branches count:', formattedBranches.length);
-        
-        setBranches(formattedBranches);
-        await AsyncStorage.setItem('cached_branches', JSON.stringify(formattedBranches));
-        console.log('Branches saved to cache');
-        return;
-      }
-    } catch (error) {
-      console.log('Error fetching branches, using cache:', error);
-    }
-    
-    await loadBranchesFromCache();
-  };
-
-  // Load branches from cache
-  const loadBranchesFromCache = async () => {
-    try {
-      const cachedBranches = await AsyncStorage.getItem('cached_branches');
-      
-      if (cachedBranches) {
-        const parsed = JSON.parse(cachedBranches);
-        setBranches(parsed);
-        console.log('Loaded branches from cache:', parsed.length);
-        return;
-      }
-    } catch (cacheError) {
-      console.log('No cached branches found');
-    }
-    
-    // Fallback to empty array if no cache
-    setBranches([]);
-  };
-
-  // Get payment method from local storage
-  const getPaymentMethodFromLocalStorage = async (collectionId: string): Promise<PaymentMethod | null> => {
-    try {
-      if (!userCredentials?.userId) return null;
-      
-      const storageKey = `collection_payment_methods_${userCredentials.userId}`;
-      const storedPaymentMethods = await AsyncStorage.getItem(storageKey);
-      
-      if (storedPaymentMethods) {
-        const paymentMethods = JSON.parse(storedPaymentMethods);
-        return paymentMethods[collectionId] || null;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error getting payment method from local storage:', error);
-      return null;
-    }
-  };
-
-  // Helper function to normalize user ID for comparison
-  const normalizeUserId = (userId: string | undefined | null): string => {
-    if (!userId) return '';
-    return userId.toString().toLowerCase().trim();
-  };
-
-  // Helper function to check if collection belongs to user
-  const isUserCollection = (collection: any, currentUserId: string): boolean => {
-    const normalizedCurrentUserId = normalizeUserId(currentUserId);
-    
-    // Check all possible user ID fields
-    const possibleUserIds = [
-      collection.user_id,
-      collection.userId,
-      collection.user,
-      collection.user_email,
-      collection.userEmail,
-      collection.created_by,
-      collection.createdBy,
-    ];
-    
-    for (const possibleId of possibleUserIds) {
-      if (possibleId) {
-        const normalizedPossibleId = normalizeUserId(possibleId);
-        if (normalizedPossibleId === normalizedCurrentUserId) {
-          console.log(`Match found: ${possibleId} === ${currentUserId}`);
-          return true;
+      const res = await makeAPICall('/clients', 'GET', null, false, creds);
+      if (res && Array.isArray(res)) {
+        if (__DEV__ && res.length > 0) {
+          console.log('RAW CUSTOMER DEBUG → keys:', Object.keys(res[0]));
+          console.log('RAW CUSTOMER DEBUG → first customer:', JSON.stringify(res[0]));
         }
+        const formatted: Customer[] = res.map(formatCustomer);
+        setCustomers([...formatted, ...manual]);
+        await AsyncStorage.setItem('cached_customers', JSON.stringify(formatted));
       }
+    } catch {
+      try {
+        const cached = await AsyncStorage.getItem('cached_customers');
+        const manual = await loadManualCustomers(creds.userId);
+        setCustomers(cached ? [...JSON.parse(cached), ...manual] : manual);
+      } catch {}
     }
-    
-    console.log(`No match for collection ID ${collection.id}. created_by: ${collection.created_by}, current user: ${currentUserId}`);
+  };
+
+  /* ── Branches ── */
+  const fetchBranches = async (creds: UserCredentials): Promise<Branch[]> => {
+    try {
+      const cached = await AsyncStorage.getItem('cached_branches');
+      if (cached) {
+        const parsed: Branch[] = JSON.parse(cached);
+        setBranches(parsed);
+        // refresh silently in background
+        makeAPICall('/departments', 'GET', null, false, creds).then((res: any) => {
+          const data: any[] = res?.data && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+          if (data.length > 0) {
+            const formatted: Branch[] = data.map((b: any, i: number) => ({
+              id:   b.id?.toString() || i.toString(),
+              name: b.name || b.department_name || 'Unknown',
+              code: b.code || '',
+            }));
+            setBranches(formatted);
+            AsyncStorage.setItem('cached_branches', JSON.stringify(formatted));
+          }
+        }).catch(() => {});
+        return parsed;
+      }
+      const res = await makeAPICall('/departments', 'GET', null, false, creds);
+      const data: any[] = res?.data && Array.isArray(res.data) ? res.data : Array.isArray(res) ? res : [];
+      if (data.length > 0) {
+        const formatted: Branch[] = data.map((b: any, i: number) => ({
+          id:   b.id?.toString() || i.toString(),
+          name: b.name || b.department_name || 'Unknown',
+          code: b.code || '',
+        }));
+        setBranches(formatted);
+        await AsyncStorage.setItem('cached_branches', JSON.stringify(formatted));
+        return formatted;
+      }
+    } catch {}
+    return [];
+  };
+
+  /* ── Helper: resolve branch name ── */
+  const getBranchName = (collection: any, branchList: Branch[]): string => {
+    const direct = collection.department || collection.branch || collection.branch_name || collection.branchName;
+    if (direct?.trim()) return direct;
+    const id = (collection.branch_id || collection.branchId)?.toString();
+    return branchList.find(b => b.id === id)?.name || 'Unknown Branch';
+  };
+
+  /* ── Helper: resolve proof URL ── */
+  const resolveProofUrl = (collection: any): string | null => {
+    const url =
+      collection.cloudflare_r2_url ||
+      collection.payment_proof_url ||
+      collection.screenshot_url ||
+      collection.payment_proof ||
+      collection.payment_screenshot ||
+      collection.screenshot ||
+      null;
+
+    if (!url) return null;
+    if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('file:')) return url;
+    return `https://myimc.in${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  /* ── Helper: resolve collection type ── */
+  const resolveCollectionType = (collection: any): CollectionType => {
+    const raw = (
+      collection.collection_type ||
+      collection.payment_method  ||
+      collection.paymentMethod   ||
+      'upi'
+    ).toLowerCase().replace(' ', '_');
+
+    if (['upi', 'cash', 'cheque', 'neft', 'bank_transfer'].includes(raw)) {
+      return raw as CollectionType;
+    }
+    return 'upi';
+  };
+
+  /* ── Map raw API item → CollectionEntry ── */
+  const mapCollection = (c: any, i: number, branchList: Branch[]): CollectionEntry => ({
+    id:                    c.id?.toString()          || i.toString(),
+    customerId:            c.customer_id?.toString() || c.client_id?.toString() || '',
+    customerName:          c.client_name             || c.customer_name         || 'Unknown Customer',
+    customerPlace:         c.client_place            || c.customer_place        || c.place ||
+                            c.client_location         || c.customer_location     || c.location || '',
+    company:               c.company                 || '',
+    branchId:              c.branch_id?.toString()   || '',
+    branchName:            getBranchName(c, branchList),
+    collectionType:        resolveCollectionType(c),
+    collectionTypeDisplay: c.collection_type_display || '',
+    amount:                c.amount?.toString()      || '0',
+    paidFor:               c.paid_for                || '',
+    notes:                 c.notes                   || '',
+    paymentProofUrl:       resolveProofUrl(c),
+    status:                c.status                  || 'pending',
+    createdAt:             c.created_at              || c.createdAt || new Date().toISOString(),
+    createdByName:         c.created_by_name || c.user_name || '',
+    // API returns `created_by` (numeric id) — not `created_by_id`
+    createdById:           c.created_by?.toString() || c.created_by_id?.toString() || c.user_id?.toString() || '',
+  });
+
+  /* ── Filter collections to logged-in user only ── */
+  const filterToUser = (entries: CollectionEntry[], creds: UserCredentials): CollectionEntry[] => {
+    const uid      = creds.userId.toLowerCase().trim();
+    const uname    = (creds.username || '').toLowerCase().trim();
+
+    if (__DEV__) {
+      console.log('FILTER DEBUG → creds.userId:', creds.userId, '| creds.username:', creds.username);
+    }
+
+   return entries.filter(c => {
+  const byName = (c.createdByName || '').toLowerCase().trim();
+  const byId   = (c.createdById || '').toLowerCase().trim();
+  const matched =
+    (byName && (byName === uid || (uname && byName === uname))) ||
+    (byId && byId === uid);
+
+      if (__DEV__) {
+        console.log(
+          `FILTER DEBUG → id:${c.id} client:"${c.customerName}" createdByName:"${c.createdByName}" createdById:"${c.createdById}" → ${matched ? 'KEEP' : 'DROP'}`
+        );
+      }
+
+      return matched;
+    });
+  };
+
+  /* ── Load cached collections ── */
+  const loadCachedCollections = async (creds: UserCredentials): Promise<boolean> => {
+    try {
+      const raw = await AsyncStorage.getItem(`collections_${creds.userId}`);
+      if (raw) {
+        const parsed: CollectionEntry[] = JSON.parse(raw);
+        setCollections(parsed);
+        return true;
+      }
+    } catch {}
     return false;
   };
 
-  // Helper function to get branch name - THIS IS THE KEY FIX
-  const getBranchName = (collection: any): string => {
-    // First, try to get branch name from the API response (multiple possible field names)
-    const apiBranchName = collection.department || 
-                         collection.branch || 
-                         collection.branch_name || 
-                         collection.branchName ||
-                         collection.department_name ||
-                         collection.dept_name;
-    
-    if (apiBranchName && apiBranchName.trim() !== '') {
-      console.log(`Found branch name from API: ${apiBranchName}`);
-      return apiBranchName;
-    }
-    
-    // If no branch name in API response, try to match by branch ID
-    if (collection.branch_id || collection.branchId) {
-      const branchId = (collection.branch_id || collection.branchId)?.toString();
-      const matchedBranch = branches.find(b => b.id === branchId);
-      
-      if (matchedBranch) {
-        console.log(`Found branch by ID ${branchId}: ${matchedBranch.name}`);
-        return matchedBranch.name;
-      }
-    }
-    
-    console.log(`No branch name found for collection ${collection.id}`);
-    return 'Unknown Branch';
-  };
+  /* ── Fetch collections — auto-discovers working URL from candidates ── */
+  const fetchCollections = async (creds: UserCredentials, branchList: Branch[]) => {
+    const authHeader = `Basic ${btoa(`${creds.userId}:${creds.password}`)}`;
 
-  // Fetch collections - UPDATED with branch name fix
-  const fetchCollections = async () => {
     try {
-      setIsLoadingCollections(true);
-      
-      // Load from cache first for instant display
-      await loadCachedCollections();
-      
-      // Then fetch fresh data in background
-      if (customers.length === 0) {
-        fetchCustomers(); // Don't await - run in parallel
-      }
-      
-      // Make sure branches are loaded
-      if (branches.length === 0) {
-        fetchBranches(); // Don't await - run in parallel
-      }
-      
-      // First, try to fetch from API
-      let apiCollections: CollectionEntry[] = [];
-      let apiSuccess = false;
-      
-      try {
-        console.log('Fetching collections from API...');
-        const response = await makeAPICall('/collections/');
-        
-        if (response && response.data && Array.isArray(response.data)) {
-          console.log(`API returned ${response.data.length} total collections`);
-          
-          // Debug: Log first collection structure
-          if (response.data.length > 0) {
-            console.log('Sample collection fields:', Object.keys(response.data[0]));
-            console.log('Sample collection data:', JSON.stringify(response.data[0], null, 2));
-          }
-          
-          // Filter collections by logged-in user
-          const userCollections = response.data.filter((collection: any) => {
-            return isUserCollection(collection, userCredentials?.userId || '');
+      let rawList: any[] = [];
+      let found = false;
+
+      for (const url of COLLECTION_API_CANDIDATES) {
+        try {
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: { Authorization: authHeader },
+            credentials: 'include',
           });
-          
-          console.log(`Filtered ${userCollections.length} collections for user ${userCredentials?.userId}`);
-          
-          // Process each collection
-          for (let index = 0; index < userCollections.length; index++) {
-            const collection = userCollections[index];
-            
-            // Handle screenshot URL
-            let screenshotUrl = collection.screenshot_url || collection.payment_screenshot || collection.screenshot;
-            
-            if (screenshotUrl && !screenshotUrl.startsWith('http') && !screenshotUrl.startsWith('data:') && !screenshotUrl.startsWith('file:')) {
-              if (screenshotUrl.startsWith('/')) {
-                screenshotUrl = `https://myimc.in${screenshotUrl}`;
-              } else {
-                screenshotUrl = `https://myimc.in/${screenshotUrl}`;
-              }
-            }
-            
-            // Handle notes - check paid_for field first
-            const displayNotes = collection.paid_for || collection.notes || 'No notes';
-            
-            // Handle customer place
-            let customerPlace = collection.client_place || 
-                               collection.customer_place || 
-                               collection.place || 
-                               collection.location || 
-                               collection.address || 
-                               collection.client_address ||
-                               collection.customer_address ||
-                               '';
-            
-            if (!customerPlace || customerPlace.trim() === '') {
-              const nameToMatch = collection.client_name || collection.customer_name || '';
-              let matchedCustomer = null;
-              
-              if (nameToMatch) {
-                matchedCustomer = customers.find(c => 
-                  c.name.toLowerCase() === nameToMatch.toLowerCase()
-                );
-                if (matchedCustomer) {
-                  customerPlace = matchedCustomer.place || '';
-                }
-              }
-              
-              if (!matchedCustomer && nameToMatch) {
-                matchedCustomer = customers.find(c => 
-                  c.name.toLowerCase().includes(nameToMatch.toLowerCase()) ||
-                  nameToMatch.toLowerCase().includes(c.name.toLowerCase())
-                );
-                if (matchedCustomer) {
-                  customerPlace = matchedCustomer.place || '';
-                }
-              }
-              
-              if (!matchedCustomer && (collection.customer_id || collection.client_id)) {
-                const idToMatch = (collection.customer_id || collection.client_id)?.toString();
-                matchedCustomer = customers.find(c => c.id === idToMatch);
-                if (matchedCustomer) {
-                  customerPlace = matchedCustomer.place || '';
-                }
-              }
-            }
-            
-            const collectionId = collection.id?.toString() || index.toString();
-            
-            // Get payment method from local storage or API
-            let paymentMethod: PaymentMethod = 'UPI';
-            if (collectionId) {
-              const storedPaymentMethod = await getPaymentMethodFromLocalStorage(collectionId);
-              if (storedPaymentMethod) {
-                paymentMethod = storedPaymentMethod;
-              } else if (collection.payment_method || collection.paymentMethod) {
-                const apiPaymentMethod = (collection.payment_method || collection.paymentMethod).toLowerCase();
-                if (['upi', 'cash', 'cheque', 'neft'].includes(apiPaymentMethod)) {
-                  paymentMethod = apiPaymentMethod as PaymentMethod;
-                }
-              }
-            }
-            
-            // Extract user name from API response
-            const userName = collection.user_name || collection.userName || collection.user || 'Unknown User';
-            
-            // GET BRANCH NAME - THIS IS THE FIX
-            const branchName = getBranchName(collection);
-            
-            apiCollections.push({
-              id: collectionId,
-              customerId: collection.customer_id?.toString() || collection.client_id?.toString() || '',
-              customerName: collection.client_name || collection.customer_name || 'Unknown Customer',
-              customerPlace: customerPlace || '',
-              branchId: collection.branch_id?.toString() || collection.branchId?.toString() || '',
-              branchName: branchName,  // Use the helper function result
-              amount: collection.amount?.toString() || '0',
-              notes: displayNotes,
-              screenshot: screenshotUrl,
-              createdAt: collection.created_at || collection.createdAt || new Date().toISOString(),
-              paymentMethod: paymentMethod,
-              userName: userName,
-            });
+
+          if (!res.ok) {
+            console.log(`fetchCollections: ${url} → ${res.status}, trying next…`);
+            continue;
           }
-          
-          apiSuccess = true;
+
+          const text = await res.text();
+          let parsed: any;
+          try { parsed = JSON.parse(text); }
+          catch { console.log(`fetchCollections: ${url} returned non-JSON, trying next…`); continue; }
+
+          // Normalise response shape
+          if (Array.isArray(parsed)) {
+            rawList = parsed;
+          } else if (parsed?.data && Array.isArray(parsed.data)) {
+            rawList = parsed.data;
+          } else if (parsed?.results && Array.isArray(parsed.results)) {
+            rawList = parsed.results;
+          } else {
+            console.log(`fetchCollections: ${url} returned unexpected shape, trying next…`);
+            continue;
+          }
+
+          console.log(`fetchCollections: success with ${url}, got ${rawList.length} records`);
+          if (__DEV__ && rawList.length > 0) {
+            console.log('RAW RECORD DEBUG → keys:', Object.keys(rawList[0]));
+            console.log('RAW RECORD DEBUG → first record:', JSON.stringify(rawList[0]));
+          }
+          found = true;
+          break;
+        } catch (urlErr) {
+          console.log(`fetchCollections: ${url} threw error, trying next…`);
         }
-      } catch (apiError) {
-        console.error('Error fetching from API:', apiError);
       }
-      
-      // Load cached collections
-      let cachedCollections: CollectionEntry[] = [];
+
+      if (!found) {
+        console.error('fetchCollections: all candidate URLs failed');
+        return;
+      }
+
+      const mapped: CollectionEntry[] = rawList.map((c: any, i: number) =>
+        mapCollection(c, i, branchList)
+      );
+
+      const userCollections = filterToUser(mapped, creds);
+
+      // Workaround for a backend limitation: the list endpoint appears to
+      // always return the same fixed page of records rather than the
+      // newest ones, so a just-submitted collection can be missing from
+      // it entirely. Keep showing any recently-cached local entries the
+      // server list doesn't include, until the server catches up (or 24h
+      // passes, so a genuine server-side deletion doesn't stay hidden forever).
+      let merged = userCollections;
       try {
-        if (userCredentials?.userId) {
-          const storageKey = `collections_${userCredentials.userId}`;
-          const storedCollections = await AsyncStorage.getItem(storageKey);
-          
-          if (storedCollections) {
-            cachedCollections = JSON.parse(storedCollections);
-            console.log(`Loaded ${cachedCollections.length} cached collections`);
+        const cachedRaw = await AsyncStorage.getItem(`collections_${creds.userId}`);
+        if (cachedRaw) {
+          const cached: CollectionEntry[] = JSON.parse(cachedRaw);
+          const serverIds = new Set(userCollections.map(e => e.id));
+          const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const pendingLocal = cached.filter(e =>
+            !serverIds.has(e.id) && new Date(e.createdAt).getTime() > dayAgo
+          );
+          if (pendingLocal.length > 0) {
+            if (__DEV__) console.log('MERGE DEBUG → keeping pending local entries not yet in server list:', pendingLocal.map(e => e.id));
+            merged = [...pendingLocal, ...userCollections];
           }
         }
-      } catch (cacheError) {
-        console.error('Error loading cached collections:', cacheError);
-      }
-      
-      // Merge API and cached collections, removing duplicates
-      let mergedCollections: CollectionEntry[] = [];
-      
-      if (apiSuccess && apiCollections.length > 0) {
-        mergedCollections = apiCollections;
-        console.log(`Using ${apiCollections.length} collections from API`);
-        
-        const apiIds = new Set(apiCollections.map(c => c.id));
-        const uniqueCachedCollections = cachedCollections.filter(c => !apiIds.has(c.id));
-        
-        if (uniqueCachedCollections.length > 0) {
-          console.log(`Adding ${uniqueCachedCollections.length} unique cached collections`);
-          mergedCollections = [...mergedCollections, ...uniqueCachedCollections];
-        }
-        
-        if (userCredentials?.userId) {
-          const storageKey = `collections_${userCredentials.userId}`;
-          await AsyncStorage.setItem(storageKey, JSON.stringify(mergedCollections));
-        }
-      } else {
-        console.log(`Using ${cachedCollections.length} cached collections only`);
-        mergedCollections = cachedCollections;
-      }
-      
-      // Fix customer places and branch names for all collections
-      const fixedCollections = mergedCollections.map((collection) => {
-        let customerPlace = collection.customerPlace;
-        if (!customerPlace || customerPlace.trim() === '') {
-          const customerData = customers.find(c => c.id === collection.customerId || c.name === collection.customerName);
-          if (customerData && customerData.place) {
-            customerPlace = customerData.place;
-          }
-        }
-        
-        // Fix branch name if it's "Unknown Branch"
-        let branchName = collection.branchName;
-        if (branchName === 'Unknown Branch' && collection.branchId) {
-          const branchData = branches.find(b => b.id === collection.branchId);
-          if (branchData) {
-            branchName = branchData.name;
-            console.log(`Fixed branch name for collection ${collection.id}: ${branchName}`);
-          }
-        }
-        
-        return {
-          ...collection,
-          customerPlace: customerPlace || '',
-          branchName: branchName,
-          notes: collection.notes && collection.notes.trim() !== '' && collection.notes !== 'Collection payment' 
-            ? collection.notes 
-            : 'No notes',
-          paymentMethod: collection.paymentMethod || 'UPI',
-          userName: collection.userName || 'Unknown User',
-        };
-      });
-      
-      // Sort by creation date (newest first)
-      fixedCollections.sort((a, b) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
-      
-      console.log(`Setting ${fixedCollections.length} total collections`);
-      setCollections(fixedCollections);
-      
-      // Update loading state immediately after setting collections
-      setIsLoadingCollections(false);
-      
-    } catch (error) {
-      console.error('Error in fetchCollections:', error);
-      await loadCachedCollections();
+      } catch {}
+
+      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setCollections(merged);
+      await AsyncStorage.setItem(`collections_${creds.userId}`, JSON.stringify(merged));
+
+    } catch (err) {
+      console.error('Error in fetchCollections:', err);
     } finally {
       setIsLoadingCollections(false);
     }
   };
 
-  // Load cached collections
-  const loadCachedCollections = async () => {
-    try {
-      if (!userCredentials?.userId) {
-        return;
-      }
-      
-      const storageKey = `collections_${userCredentials.userId}`;
-      const storedCollections = await AsyncStorage.getItem(storageKey);
-      
-      if (storedCollections) {
-        const collectionsData: CollectionEntry[] = JSON.parse(storedCollections);
-        
-        // Set collections immediately without fixing - for instant display
-        setCollections(collectionsData);
-        setIsLoadingCollections(false);
-        
-        // Fix data in background
-        setTimeout(() => {
-          const fixedCollections = collectionsData.map((collection) => {
-            let customerPlace = collection.customerPlace;
-            if (!customerPlace || customerPlace.trim() === '') {
-              const customerData = customers.find(c => c.id === collection.customerId || c.name === collection.customerName);
-              if (customerData && customerData.place) {
-                customerPlace = customerData.place;
-              }
-            }
-            
-            // Fix branch name
-            let branchName = collection.branchName;
-            if (branchName === 'Unknown Branch' && collection.branchId) {
-              const branchData = branches.find(b => b.id === collection.branchId);
-              if (branchData) {
-                branchName = branchData.name;
-              }
-            }
-            
-            return {
-              ...collection,
-              customerPlace: customerPlace || '',
-              branchName: branchName,
-              notes: collection.notes && collection.notes.trim() !== '' && collection.notes !== 'Collection payment' 
-                ? collection.notes 
-                : 'No notes',
-              screenshot: collection.screenshot,
-              paymentMethod: collection.paymentMethod || 'UPI',
-              userName: collection.userName || 'Unknown User',
-            };
-          });
-          
-          setCollections(fixedCollections);
-        }, 100);
-        
-        console.log(`Loaded ${collectionsData.length} collections from cache`);
-      }
-    } catch (error) {
-      console.error('Error loading cached collections:', error);
-    }
-  };
-
-  // Handle image error
-  const handleImageError = useCallback((imageUrl: string) => {
-    setImageErrors(prev => new Set([...prev, imageUrl]));
-  }, []);
-
-  // Handle refresh
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setImageErrors(new Set());
-    setIsLoadingCollections(true);
-    
-    await fetchBranches(); // Make sure branches are loaded first
-    await fetchCustomers();
-    await fetchCollections();
-    
-    setRefreshing(false);
-  }, [userCredentials]);
-
-  // Handle edit collection
-  const handleEditCollection = useCallback((collection: CollectionEntry) => {
-    navigation.navigate('AddCollection', {
-      editData: JSON.stringify(collection)
-    });
-  }, [navigation]);
-
-  // Animated loading dots
-  useEffect(() => {
-    if (isLoadingCollections) {
-      const createDotAnimation = (animValue: Animated.Value, delay: number) => {
-        return Animated.loop(
-          Animated.sequence([
-            Animated.delay(delay),
-            Animated.timing(animValue, {
-              toValue: 1,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-            Animated.timing(animValue, {
-              toValue: 0,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-          ])
-        );
-      };
-
-      const animations = Animated.parallel([
-        createDotAnimation(dot1Anim, 0),
-        createDotAnimation(dot2Anim, 100),
-        createDotAnimation(dot3Anim, 200),
-      ]);
-
-      animations.start();
-
-      return () => {
-        animations.stop();
-        dot1Anim.setValue(0);
-        dot2Anim.setValue(0);
-        dot3Anim.setValue(0);
-      };
-    }
-  }, [isLoadingCollections]);
-
-  // Initialize
+  /* ── Init: load credentials → show cache → fetch fresh in parallel ── */
   useEffect(() => {
     const init = async () => {
-      const hasCredentials = await initializeUser();
-      setIsInitializing(false);
+      try {
+        const [userId, password, username] = await Promise.all([
+          SecureStore.getItemAsync('userId'),
+          SecureStore.getItemAsync('password'),
+          SecureStore.getItemAsync('username'),
+        ]);
+
+        if (!userId || !password) {
+          navigation.replace('Login');
+          return;
+        }
+
+        const creds: UserCredentials = { userId, password, username: username || undefined };
+        setUserCredentials(creds);
+
+        // Show cached collections immediately so screen feels instant
+        const hasCached = await loadCachedCollections(creds);
+        if (hasCached) setIsLoadingCollections(false);
+
+        // Fetch branches (from cache first) and customers in parallel, then collections
+        const [branchList] = await Promise.all([
+          fetchBranches(creds),
+          fetchCustomers(creds),
+        ]);
+
+        // Now fetch fresh collections (branches already resolved — no extra call)
+        await fetchCollections(creds, branchList);
+
+      } catch {
+        navigation.replace('Login');
+      } finally {
+        setIsInitializing(false);
+        setIsLoadingCollections(false);
+      }
     };
+
     init();
   }, []);
 
-  // Load data
+  /* ── Refresh on focus: catches new/edited collections added from the
+         Add Collection screen, which otherwise wouldn't appear until a
+         manual pull-to-refresh since this screen doesn't unmount ── */
+  const isFirstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstFocus.current) {
+        isFirstFocus.current = false;
+        return; // initial load already handled by the init useEffect above
+      }
+      if (!userCredentials) return;
+
+      (async () => {
+        const branchList = await fetchBranches(userCredentials);
+        await Promise.all([
+          fetchCustomers(userCredentials),
+          fetchCollections(userCredentials, branchList),
+        ]);
+      })();
+    }, [userCredentials])
+  );
+
+  /* ── Loading dots animation ── */
   useEffect(() => {
-    if (userCredentials && !isInitializing && !isLoadingData) {
-      const loadData = async () => {
-        setIsLoadingData(true);
-        setIsLoadingCollections(true);
-        try {
-          // Load all data in parallel for faster loading
-          await Promise.all([
-            fetchBranches(),
-            fetchCustomers(),
-            fetchCollections()
-          ]);
-        } catch (error) {
-          console.error('Error loading data:', error);
-        } finally {
-          setIsLoadingData(false);
-        }
-      };
-      loadData();
-    }
-  }, [userCredentials, isInitializing]);
+    if (!isLoadingCollections) return;
 
-  // Format date
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
+    const anim = (v: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(v, { toValue: 1, duration: 280, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0, duration: 280, useNativeDriver: true }),
+        ])
+      );
+
+    const a = Animated.parallel([anim(dot1, 0), anim(dot2, 120), anim(dot3, 240)]);
+    a.start();
+    return () => { a.stop(); dot1.setValue(0); dot2.setValue(0); dot3.setValue(0); };
+  }, [isLoadingCollections]);
+
+  /* ── Handlers ── */
+  const onRefresh = useCallback(async () => {
+    if (!userCredentials) return;
+    setRefreshing(true);
+    setImageErrors(new Set());
+    const branchList = await fetchBranches(userCredentials);
+    await Promise.all([
+      fetchCustomers(userCredentials),
+      fetchCollections(userCredentials, branchList),
+    ]);
+    setRefreshing(false);
+  }, [userCredentials]);
+
+  const handleImageError = useCallback((url: string) => {
+    setImageErrors(prev => new Set([...prev, url]));
+  }, []);
+
+  const handleEditCollection = useCallback((item: CollectionEntry) => {
+    setShowDetailsModal(false);
+    navigation.navigate('AddCollection', { editData: JSON.stringify(item) });
+  }, [navigation]);
+
+  const openDetails = useCallback((item: CollectionEntry) => {
+    setSelectedCollection(item);
+    setShowDetailsModal(true);
+  }, []);
+
+  const closeDetails = useCallback(() => {
+    setShowDetailsModal(false);
+  }, []);
+
+  /* ── Formatters ── */
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
   };
 
-  // Render thumbnail image
-  const renderThumbnailImage = (item: CollectionEntry) => {
-    const imageUrl = item.screenshot;
-    const hasError = imageErrors.has(imageUrl || '');
-    
-    if (!imageUrl || hasError) {
-      return (
-        <View style={styles.thumbnailPlaceholder}>
-          <Ionicons name="image-outline" size={32} color="#666" />
-          <Text style={styles.noImageText}>No Image</Text>
-        </View>
-      );
-    }
+  const formatAmount = (val: string) => {
+    const n = parseFloat(val);
+    return isNaN(n) ? val : `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
-    return (
-      <Image
-        source={{ uri: imageUrl }}
-        style={styles.thumbnailImage}
-        onError={() => handleImageError(imageUrl)}
-        resizeMode="cover"
-      />
+  /* ── Resolve a collection's place, tolerant of case/whitespace differences
+         between client_name on the collection and name in the customers list ── */
+  const normalize = (s?: string) => (s || '').trim().toLowerCase();
+
+  const resolvePlace = (item: CollectionEntry, customerList: Customer[]): string => {
+    if (item.customerPlace) return item.customerPlace;
+    const nameNorm = normalize(item.customerName);
+    const match = customerList.find(c =>
+      (item.customerId && c.id === item.customerId) ||
+      normalize(c.name) === nameNorm
     );
+    return match?.place || '';
   };
 
-  // Render collection item
-  const renderCollectionItem = useCallback(({ item, index }: { item: CollectionEntry; index: number }) => {
-    const cardColor = CARD_COLORS[index % CARD_COLORS.length];
-    
-    const getDisplayPlace = () => {
-      if (item.customerPlace && item.customerPlace.trim() !== '') {
-        return item.customerPlace;
-      }
-      
-      const customer = customers.find(c => 
-        c.id === item.customerId || 
-        c.name === item.customerName
-      );
-      
-      return customer?.place || '';
-    };
-
-    const displayPlace = getDisplayPlace();
-    const hasPlace = displayPlace.trim() !== '';
-
-    const getPaymentMethodConfig = (method: PaymentMethod) => {
-      switch (method) {
-        case 'UPI':
-          return { color: '#1f2221ff', bgColor: '#55b82eff', label: 'UPI'};
-        case 'cash':
-          return { color: '#302b28ff', bgColor: '#d9a925ff', label: 'Cash' };
-        case 'cheque':
-          return { color: '#efeef6ff', bgColor: '#b74ed4ff', label: 'Cheque' };
-        case 'neft':
-          return { color: '#2f0615ff', bgColor: '#fc6780ff', label: 'NEFT' };
-        default:
-          return { color: '#666', bgColor: '#F3F4F6', label: 'Payment' };
-      }
-    };
-
-    const paymentConfig = getPaymentMethodConfig(item.paymentMethod || 'UPI');
+  /* ── Render: compact row card ── */
+  const renderCollectionItem = useCallback(({ item }: { item: CollectionEntry }) => {
+    const typeConfig   = COLLECTION_TYPE_CONFIG[item.collectionType] || COLLECTION_TYPE_CONFIG.upi;
+    const statusConfig = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
+    const displayPlace = resolvePlace(item, customers);
 
     return (
-      <View style={[styles.collectionCard, { backgroundColor: cardColor }]}>
-        <View style={styles.cardTopSection}>
-          <View style={[styles.paymentMethodTag, { backgroundColor: paymentConfig.bgColor }]}>
-            <Text style={[styles.paymentMethodText, { color: paymentConfig.color }]}>
-              {paymentConfig.label}
+      <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => openDetails(item)}>
+        <View style={[styles.rowTypeDot, { backgroundColor: typeConfig.bg }]}>
+          <Ionicons name={typeConfig.icon as any} size={16} color={typeConfig.text} />
+        </View>
+
+        <View style={styles.rowMain}>
+          <Text style={styles.rowName} numberOfLines={1}>{item.customerName}</Text>
+          <View style={styles.rowSubRow}>
+            <Ionicons name="location-outline" size={11} color="#A39A85" />
+            <Text style={styles.rowSub} numberOfLines={1}>
+              {displayPlace || 'Location not available'}
             </Text>
           </View>
         </View>
 
-        <View style={styles.cardContent}>
-          <View style={styles.screenshotSection}>
-            <TouchableOpacity 
-              style={styles.screenshotContainer}
-              onPress={() => {
-                if (item.screenshot && !imageErrors.has(item.screenshot)) {
-                  setSelectedImage(item.screenshot);
-                  setShowImageModal(true);
-                }
-              }}
-              activeOpacity={0.8}
-            >
-              {renderThumbnailImage(item)}
-            </TouchableOpacity>
-            <Text style={styles.dateText}>{formatDate(item.createdAt)}</Text>
-          </View>
-
-          <View style={styles.detailsContainer}>
-            <Text style={styles.customerName} numberOfLines={1}>
-              {item.customerName}
-            </Text>
-
-            {hasPlace && (
-              <View style={styles.detailRow}>
-                <Ionicons name="location-outline" size={16} color="#5d28d8ff" />
-                <Text style={styles.placeText} numberOfLines={2}>
-                  {displayPlace}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.detailRow}>
-              <Ionicons name="business-outline" size={16} color="#dd2222ff" />
-              <Text style={styles.branchText} numberOfLines={1}>
-                {item.branchName}
-              </Text>
-            </View>
-
-            <View style={styles.amountContainer}>
-              <Text style={styles.amountText}>
-                ₹{parseFloat(item.amount).toLocaleString('en-IN')}
-              </Text>
-            </View>
-
-            <TouchableOpacity 
-              style={styles.editButton}
-              onPress={() => handleEditCollection(item)}
-            >
-              <Ionicons name="create-outline" size={18} color="#ffffff" />
-            </TouchableOpacity>
+        <View style={styles.rowRight}>
+          <Text style={styles.rowAmount} numberOfLines={1}>{formatAmount(item.amount)}</Text>
+          <View style={[styles.rowStatusPill, { backgroundColor: statusConfig.bg }]}>
+            <Text style={[styles.rowStatusText, { color: statusConfig.text }]}>{statusConfig.label}</Text>
           </View>
         </View>
-      </View>
-    );
-  }, [handleEditCollection, imageErrors, handleImageError, customers]);
 
-  // Show loading indicator
-  if (isInitializing) {
+        <TouchableOpacity
+          style={styles.eyeBtn}
+          onPress={() => openDetails(item)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="eye-outline" size={18} color="#7E7767" />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  }, [customers, openDetails]);
+
+  /* ── Init loading gate ── */
+  if (isInitializing && collections.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text style={styles.loadingText}>Loading...</Text>
+      <View style={styles.initLoader}>
+        <ActivityIndicator size="large" color="#F5C451" />
+        <Text style={styles.initLoaderText}>Loading…</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#1C1B17" />
+        <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={22} color="#1C1B17" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Collections</Text>
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.headerBtn, styles.addBtn]}
           onPress={() => navigation.navigate('AddCollection')}
         >
-          <Ionicons name="add" size={24} color="#453714" />
+          <Ionicons name="add" size={22} color="#1C1B17" />
         </TouchableOpacity>
       </View>
 
       <FlatList
         data={collections}
-        renderItem={renderCollectionItem}
         keyExtractor={item => item.id}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#F4C84A"
-          />
-        }
+        renderItem={renderCollectionItem}
         contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F5C451" colors={['#F5C451']} />
+        }
         ListEmptyComponent={
           isLoadingCollections ? (
-            <View style={styles.loadingContainer}>
-              <View style={styles.loadingContent}>
-                <View style={styles.loadingDotsContainer}>
+            <View style={styles.centeredBlock}>
+              <View style={styles.dotsRow}>
+                {[dot1, dot2, dot3].map((d, i) => (
                   <Animated.View
+                    key={i}
                     style={[
-                      styles.loadingDot,
+                      styles.dot,
                       {
-                        opacity: dot1Anim,
-                        transform: [
-                          {
-                            scale: dot1Anim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 1.3],
-                            }),
-                          },
-                        ],
+                        opacity: d,
+                        transform: [{ scale: d.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.3] }) }],
                       },
                     ]}
                   />
-                  <Animated.View
-                    style={[
-                      styles.loadingDot,
-                      {
-                        opacity: dot2Anim,
-                        transform: [
-                          {
-                            scale: dot2Anim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 1.3],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.loadingDot,
-                      {
-                        opacity: dot3Anim,
-                        transform: [
-                          {
-                            scale: dot3Anim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 1.3],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.loadingText}>Loading collections</Text>
+                ))}
               </View>
+              <Text style={styles.loadingText}>Loading collections…</Text>
             </View>
           ) : (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="folder-open-outline" size={48} color="#87847b" />
-            <Text style={styles.emptyText}>No collections yet</Text>
-            <Text style={styles.emptySubText}>Tap + to add your first collection entry</Text>
-          </View>
+            <View style={styles.centeredBlock}>
+              <View style={styles.emptyIconWrap}>
+                <Ionicons name="wallet-outline" size={40} color="#D4A574" />
+              </View>
+              <Text style={styles.emptyTitle}>No collections yet</Text>
+              <Text style={styles.emptySub}>Tap + to add your first collection entry</Text>
+            </View>
           )
         }
       />
 
-      {/* Image View Modal */}
-      <Modal
-        visible={showImageModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowImageModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.imageModalOverlay}
-          onPress={() => setShowImageModal(false)}
-        >
-          <View style={styles.imageModalContent}>
+      {/* Image viewer modal */}
+      <Modal visible={showImageModal} transparent animationType="fade" onRequestClose={() => setShowImageModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowImageModal(false)}>
+          <View style={styles.modalContent} pointerEvents="box-none">
             {selectedImage && (
-              <Image 
-                source={{ uri: selectedImage }} 
+              <Image
+                source={{ uri: selectedImage }}
                 style={styles.fullImage}
-                onError={() => {
-                  setShowImageModal(false);
-                }}
                 resizeMode="contain"
+                onError={() => setShowImageModal(false)}
               />
             )}
-            <TouchableOpacity
-              style={styles.closeImageButton}
-              onPress={() => setShowImageModal(false)}
-            >
-              <Ionicons name="close" size={24} color="#ffffff" />
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowImageModal(false)}>
+              <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Details popup — everything not shown on the compact row */}
+      <Modal
+        visible={showDetailsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={closeDetails}
+      >
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={closeDetails} />
+
+          {selectedCollection && (() => {
+            const item         = selectedCollection;
+            const typeConfig   = COLLECTION_TYPE_CONFIG[item.collectionType] || COLLECTION_TYPE_CONFIG.upi;
+            const statusConfig = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
+            const proofUrl     = item.paymentProofUrl;
+            const hasProof     = !!proofUrl && !imageErrors.has(proofUrl);
+            const displayPlace = resolvePlace(item, customers);
+
+            return (
+              <View style={styles.sheet}>
+                <View style={styles.sheetHandle} />
+
+                <View style={styles.sheetHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sheetName} numberOfLines={1}>{item.customerName}</Text>
+                    {!!displayPlace && (
+                      <Text style={styles.sheetSubName} numberOfLines={1}>{displayPlace}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity style={styles.sheetCloseBtn} onPress={closeDetails} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="close" size={20} color="#1C1B17" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetScrollContent}>
+                  <View style={styles.sheetPillRow}>
+                    <View style={[styles.typePill, { backgroundColor: typeConfig.bg }]}>
+                      <Ionicons name={typeConfig.icon as any} size={12} color={typeConfig.text} />
+                      <Text style={[styles.typePillText, { color: typeConfig.text }]}>{typeConfig.label}</Text>
+                    </View>
+                    <View style={[styles.statusPill, { backgroundColor: statusConfig.bg }]}>
+                      <Text style={[styles.statusPillText, { color: statusConfig.text }]}>{statusConfig.label}</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.sheetProofLabel}>Payment Proof</Text>
+                  <TouchableOpacity
+                    style={styles.sheetProofBox}
+                    activeOpacity={hasProof ? 0.8 : 1}
+                    onPress={() => {
+                      if (hasProof && proofUrl) {
+                        setSelectedImage(proofUrl);
+                        setShowImageModal(true);
+                      }
+                    }}
+                  >
+                    {hasProof && proofUrl ? (
+                      <Image
+                        source={{ uri: proofUrl }}
+                        style={styles.sheetProofImage}
+                        resizeMode="cover"
+                        onError={() => handleImageError(proofUrl)}
+                      />
+                    ) : (
+                      <View style={styles.sheetProofPlaceholder}>
+                        <Ionicons name="image-outline" size={26} color="#D4A574" />
+                        <Text style={styles.proofPlaceholderText}>
+                          {item.collectionType === 'cash' ? 'Cash — no proof needed' : 'No proof uploaded'}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  <View style={styles.sheetAmountBlock}>
+                    <Text style={styles.sheetAmountLabel}>Amount</Text>
+                    <Text style={styles.sheetAmount}>{formatAmount(item.amount)}</Text>
+                  </View>
+
+                  <View style={styles.sheetDetailsCard}>
+                    {!!displayPlace && (
+                      <View style={styles.sheetDetailRow}>
+                        <Ionicons name="location-outline" size={15} color="#A39A85" />
+                        <Text style={styles.sheetDetailLabel}>Place</Text>
+                        <Text style={styles.sheetDetailValue} numberOfLines={1}>{displayPlace}</Text>
+                      </View>
+                    )}
+                    {!!item.company && (
+                      <View style={styles.sheetDetailRow}>
+                        <Ionicons name="briefcase-outline" size={15} color="#A39A85" />
+                        <Text style={styles.sheetDetailLabel}>Company</Text>
+                        <Text style={styles.sheetDetailValue} numberOfLines={1}>{item.company}</Text>
+                      </View>
+                    )}
+                    <View style={styles.sheetDetailRow}>
+                      <Ionicons name="business-outline" size={15} color="#A39A85" />
+                      <Text style={styles.sheetDetailLabel}>Branch</Text>
+                      <Text style={styles.sheetDetailValue} numberOfLines={1}>{item.branchName}</Text>
+                    </View>
+                    {!!item.paidFor && (
+                      <View style={styles.sheetDetailRow}>
+                        <Ionicons name="receipt-outline" size={15} color="#A39A85" />
+                        <Text style={styles.sheetDetailLabel}>Paid For</Text>
+                        <Text style={styles.sheetDetailValue} numberOfLines={1}>{item.paidFor}</Text>
+                      </View>
+                    )}
+                    <View style={styles.sheetDetailRow}>
+                      <Ionicons name="calendar-outline" size={15} color="#A39A85" />
+                      <Text style={styles.sheetDetailLabel}>Date</Text>
+                      <Text style={styles.sheetDetailValue} numberOfLines={1}>{formatDate(item.createdAt)}</Text>
+                    </View>
+                    {!!item.createdByName && (
+                      <View style={styles.sheetDetailRow}>
+                        <Ionicons name="person-outline" size={15} color="#A39A85" />
+                        <Text style={styles.sheetDetailLabel}>Created By</Text>
+                        <Text style={styles.sheetDetailValue} numberOfLines={1}>{item.createdByName}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {!!item.notes && item.notes.trim() !== '' && (
+                    <View style={styles.sheetNotesBlock}>
+                      <View style={styles.sheetNotesHeader}>
+                        <Ionicons name="chatbubble-outline" size={14} color="#A39A85" />
+                        <Text style={styles.sheetNotesLabel}>Notes</Text>
+                      </View>
+                      <Text style={styles.sheetNotesText}>{item.notes}</Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.sheetEditBtn}
+                    onPress={() => handleEditCollection(item)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="create-outline" size={17} color="#1C1B17" />
+                    <Text style={styles.sheetEditBtnText}>Edit Collection</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </View>
+            );
+          })()}
+        </View>
       </Modal>
     </View>
   );
 }
 
+/* ─────────────────────────── Styles ─────────────────────────── */
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
     backgroundColor: '#FAF9F6',
   },
-  loadingContainer: {
+
+  initLoader: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    backgroundColor: '#FAF9F6',
   },
-  loadingContent: {
-    alignItems: 'center',
+  initLoaderText: {
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#7E7767',
   },
-  loadingDotsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  loadingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#F4C84A',
-    marginHorizontal: 6,
-  },
-  loadingText: {
-    color: '#1C1B17',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 16,
-    backgroundColor: 'rgba(250, 249, 246, 0.8)',
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FEF8E7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 14,
+    backgroundColor: '#FAF9F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0EAD8',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '800',
     color: '#1C1B17',
+    letterSpacing: -0.3,
   },
-  addButton: {
+  headerBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#F5C451',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#F5C451',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  listContent: {
-    padding: 24,
-    paddingBottom: 20,
-  },
-  collectionCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 32,
-    padding: 24,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 20,
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 40,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  cardTopSection: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  paymentMethodTag: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 16,
+  addBtn: {
+    backgroundColor: '#F5C451',
+    shadowColor: '#F5C451',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 5,
   },
-  paymentMethodText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+
+  listContent: {
+    padding: 16,
+    paddingBottom: 32,
   },
-  cardContent: {
+
+  /* ── Compact row card ── */
+  row: {
     flexDirection: 'row',
-    height: 120,
-    marginTop: -6,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    gap: 10,
+    shadowColor: '#1C1B17',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#F0EAD8',
   },
-  screenshotSection: {
-    marginRight: 16,
-    width: 120,
-    height: 280,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginTop: -19,
-  },
-  screenshotContainer: {
-    width: 140,
-    height: 151,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: -4,
-    marginTop: -24,
-  },
-  thumbnailImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-  },
-  thumbnailPlaceholder: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+  rowTypeDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  noImageText: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 4,
-  },
-  dateText: {
-    fontSize: 11,
-    color: '#1C1B17',
-    marginTop: 7,
-    textAlign: 'center',
-    backgroundColor:'#FEF8E7',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    fontWeight: '600',
-    overflow: 'hidden',
-  },
-  detailsContainer: {
+  rowMain: {
     flex: 1,
-    justifyContent: 'space-between',
-    position: 'relative',
-    height: 120,
+    minWidth: 0,
+    gap: 2,
   },
-  customerName: {
-    fontSize: 16,
+  rowName: {
+    fontSize: 14,
     fontWeight: '700',
     color: '#1C1B17',
-    marginBottom: 8,
   },
-  detailRow: {
+  rowSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    gap: 3,
   },
-  placeText: {
-    fontSize: 13,
-    color: '#7E7767',
-    marginLeft: 6,
-    flex: 1,
+  rowSub: {
+    fontSize: 11.5,
     fontWeight: '500',
+    color: '#A39A85',
+    flexShrink: 1,
   },
-  branchText: {
-    fontSize: 13,
-    color: '#7E7767',
-    marginLeft: 6,
-    flex: 1,
-    fontWeight: '500',
+  rowRight: {
+    alignItems: 'flex-end',
+    gap: 4,
   },
-  amountContainer: {
-    marginTop: 8,
-  },
-  amountText: {
-    fontSize: 20,
+  rowAmount: {
+    fontSize: 14,
     fontWeight: '800',
     color: '#1C1B17',
   },
-  editButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#D4A574',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#D4A574',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+  rowStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 50,
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    color: '#1C1B17',
-    fontSize: 18,
+  rowStatusText: {
+    fontSize: 10,
     fontWeight: '700',
-    marginTop: 16,
+    letterSpacing: 0.2,
   },
-  emptySubText: {
-    color: '#7E7767',
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  imageModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FAF9F6',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  imageModalContent: {
-    width: screenWidth * 0.9,
-    height: screenHeight * 0.8,
-    position: 'relative',
-    backgroundColor: 'transparent',
-    borderRadius: 10,
+
+  /* ── Shared pills (used inside details sheet) ── */
+  typePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 50,
+  },
+  typePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 50,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  proofPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#A39A85',
+    textAlign: 'center',
+  },
+
+  /* ── Details bottom sheet (view more popup) ── */
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(28,27,23,0.5)',
+  },
+  sheet: {
+    backgroundColor: '#FAF9F6',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: screenHeight * 0.86,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E4DCC8',
+    marginBottom: 12,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0EAD8',
+  },
+  sheetName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1C1B17',
+  },
+  sheetSubName: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#A39A85',
+    marginTop: 2,
+  },
+  sheetCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F0EAD8',
+  },
+  sheetScrollContent: {
+    paddingTop: 16,
+    paddingBottom: 30,
+  },
+  sheetPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  sheetAmountBlock: {
+    backgroundColor: '#FEF9EE',
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sheetAmountLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A39A85',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  sheetAmount: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#1C1B17',
+  },
+  sheetDetailsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F0EAD8',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginBottom: 16,
+  },
+  sheetDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F3EC',
+  },
+  sheetDetailLabel: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#A39A85',
+    width: 82,
+  },
+  sheetDetailValue: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1C1B17',
+    textAlign: 'right',
+  },
+  sheetNotesBlock: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F0EAD8',
+    padding: 14,
+    marginBottom: 16,
+  },
+  sheetNotesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  sheetNotesLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A39A85',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  sheetNotesText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#4A4636',
+    lineHeight: 19,
+  },
+  sheetProofLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A39A85',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  sheetProofBox: {
+    borderRadius: 16,
     overflow: 'hidden',
+    marginBottom: 20,
+  },
+  sheetProofImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 16,
+  },
+  sheetProofPlaceholder: {
+    width: '100%',
+    height: 120,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#F0EAD8',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 20,
+  },
+  sheetEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingVertical: 14,
+    borderRadius: 50,
+    backgroundColor: '#F5C451',
+    shadowColor: '#F5C451',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  sheetEditBtnText: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#1C1B17',
+  },
+
+  centeredBlock: {
+    alignItems: 'center',
+    paddingTop: 80,
+    paddingHorizontal: 40,
+    gap: 10,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  dot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#F5C451',
+  },
+  loadingText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#7E7767',
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FEF9EE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1C1B17',
+  },
+  emptySub: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#A39A85',
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: screenWidth * 0.92,
+    height: screenHeight * 0.78,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
   },
   fullImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'contain',
     backgroundColor: 'transparent',
   },
-  closeImageButton: {
+  modalCloseBtn: {
     position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    top: 14,
+    right: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
   },
