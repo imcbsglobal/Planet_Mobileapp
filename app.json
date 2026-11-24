@@ -2,7 +2,7 @@
   "expo": {
     "name": "Planet",
     "slug": "MY-IMC",
-    "version": "5.2.5",
+    "version": "5.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/app_logo_IF.png",
     "scheme": "imcmobileapp",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "35",
+      "buildNumber": "40",
       "bundleIdentifier": "com.myimc2006.app",
       "infoPlist": {
         "NSAppTransportSecurity": {
@@ -35,7 +35,7 @@
       }
     },
     "android": {
-      "versionCode": 36,
+      "versionCode": 43,
       "icon": "./assets/images/app_logo_IF.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/app_logo_IF.png",
@@ -48,12 +48,15 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "blockedPermissions": [
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "web": {
@@ -92,10 +95,12 @@
       "@react-native-community/datetimepicker",
       "expo-font",
       "expo-image",
+      "expo-image-picker",
       "expo-splash-screen",
       "expo-status-bar",
       "expo-audio"
     ],
+    "owner": "anazil_lvf",
     "extra": {
       "eas": {
         "projectId": "876c6f71-1467-443f-bc8f-227de54de1e2"

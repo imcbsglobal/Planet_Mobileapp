@@ -57,7 +57,10 @@ import Profile from './app/profile';
 import PunchIn from './app/punchin';
 import StockReportCompanies from './app/StockReportCompanies';
 import StockReportProducts from './app/StockReportProduct';
+import StartTrip from './app/start_trip';
 import Target from './app/target';
+import TrelliscoErp from './app/trelliscoErp';
+import Vehicle from './app/vehicle';
 
 
 
@@ -102,6 +105,9 @@ export default function App() {
           <Stack.Screen name="StockReportProducts" component={StockReportProducts} />
           <Stack.Screen name="PunchIn" component={PunchIn} />
           <Stack.Screen name="Enquiry" component={Enquiry} />
+          <Stack.Screen name="TrelliscoErp" component={TrelliscoErp} />
+          <Stack.Screen name="Vehicle" component={Vehicle} />
+          <Stack.Screen name="StartTrip" component={StartTrip} />
 
         </Stack.Navigator>
       </NavigationContainer>

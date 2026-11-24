@@ -9,9 +9,9 @@ import {
   useAudioPlayerStatus,
   useAudioRecorder,
 } from 'expo-audio';
-import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store';
+import { buildImageFormPart, captureImageWithCamera, pickImageFromGallery, prepareImageAsset, PreparedImageAsset } from '../lib/imageUpload';
+import * as SecureStore from '../lib/secureStore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -61,15 +61,6 @@ const getFileName = (uri: string, fallbackName: string) => {
   return cleanUri.split('/').pop() || fallbackName;
 };
 
-const getImageMimeType = (fileName: string) => {
-  const extension = fileName.split('.').pop()?.toLowerCase();
-  if (extension === 'png') return 'image/png';
-  if (extension === 'webp') return 'image/webp';
-  if (extension === 'heic') return 'image/heic';
-  if (extension === 'heif') return 'image/heif';
-  return 'image/jpeg';
-};
-
 const getAudioMimeType = (fileName: string) => {
   const extension = fileName.split('.').pop()?.toLowerCase();
   if (extension === 'mp3') return 'audio/mpeg';
@@ -94,6 +85,7 @@ export default function Leads() {
 
   // Attachments
   const [photos, setPhotos] = useState<string[]>([]);
+  const [photoAsset, setPhotoAsset] = useState<PreparedImageAsset | null>(null);
 
   // Voice note
   const [voiceUri, setVoiceUri] = useState<string | null>(null);
@@ -165,43 +157,21 @@ export default function Leads() {
     }
   };
 
-  // ── Camera ────────────────────────────────────────────────────────────────────
-  const handleOpenCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Camera access is required to take photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets.length > 0) {
-      setPhotos([result.assets[0].uri]);
-    }
+  const applyPickedImage = async (asset: Awaited<ReturnType<typeof pickImageFromGallery>>) => {
+    if (!asset) return;
+    const prepared = await prepareImageAsset(asset);
+    if (!prepared) return;
+    setPhotoAsset(prepared);
+    setPhotos([prepared.uri]);
   };
 
-  // ── Gallery ───────────────────────────────────────────────────────────────────
-  const handleOpenGallery = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Gallery access is required to pick photos.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      allowsMultipleSelection: false,
-      selectionLimit: 1,
-    });
-    if (!result.canceled && result.assets.length > 0) {
-      setPhotos([result.assets[0].uri]);
-    }
-  };
+  const handleOpenCamera = async () => applyPickedImage(await captureImageWithCamera());
+
+  const handleOpenGallery = async () => applyPickedImage(await pickImageFromGallery());
 
   const handleRemovePhoto = (index: number) => {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setPhotoAsset(null);
   };
 
   const handleAttachment = () => {
@@ -298,6 +268,7 @@ export default function Leads() {
   const resetForm = () => {
     setForm(initialForm);
     setPhotos([]);
+    setPhotoAsset(null);
     setVoiceUri(null);
     setRecordingDuration(0);
   };
@@ -338,13 +309,8 @@ export default function Leads() {
       formData.append('created_by', creatorName);
       formData.append('user_id', storedUserId);
 
-      if (photos[0]) {
-        const imageName = getFileName(photos[0], `enquiry_${Date.now()}.jpg`);
-        formData.append('image', {
-          uri: normalizeFileUri(photos[0]),
-          name: imageName,
-          type: getImageMimeType(imageName),
-        } as any);
+      if (photoAsset) {
+        formData.append('image', buildImageFormPart(photoAsset) as any);
       }
 
       if (voiceUri) {

@@ -1,10 +1,9 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store';
+import { buildImageFormPart, captureImageWithCamera, pickImageFromGallery, prepareImageAsset } from '../lib/imageUpload';
+import * as SecureStore from '../lib/secureStore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -110,6 +109,7 @@ export default function PunchIn() {
   const [isLocating, setIsLocating] = useState(false);
 
   const [capturedImage, setCapturedImage] = useState<CapturedImage | null>(null);
+  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null);
   const [imageLat, setImageLat] = useState<number | null>(null);
   const [imageLng, setImageLng] = useState<number | null>(null);
 const [selectedEntry, setSelectedEntry] = useState<PunchInEntry | null>(null);
@@ -268,33 +268,19 @@ const [editingId, setEditingId] = useState<string | null>(null);
   };
 
   /* ── Camera (image proof) ── */
-  const buildCapturedImage = async (asset: ImagePicker.ImagePickerAsset): Promise<CapturedImage> => {
-    const manipulated = await ImageManipulator.manipulateAsync(
-      asset.uri,
-      [{ resize: { width: 1280 } }],
-      { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return { uri: manipulated.uri, name: `punchin_${Date.now()}.jpg`, type: 'image/jpeg' };
+  const applyPickedImage = async (asset: Awaited<ReturnType<typeof pickImageFromGallery>>) => {
+    if (!asset) return;
+    const prepared = await prepareImageAsset(asset);
+    if (!prepared) return;
+    setCapturedImage(prepared);
+    setExistingImageUrl(null);
+    setImageLat(latitude);
+    setImageLng(longitude);
   };
 
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
-      if (!result.canceled && result.assets[0]) {
-        setCapturedImage(await buildCapturedImage(result.assets[0]));
-        // Tag the photo with whatever location we currently have
-        setImageLat(latitude);
-        setImageLng(longitude);
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
-  };
+  const pickImage = async () => applyPickedImage(await pickImageFromGallery());
+
+  const takePhoto = async () => applyPickedImage(await captureImageWithCamera());
 
   const resetForm = () => {
     setClientMode('existing');
@@ -307,6 +293,7 @@ const [editingId, setEditingId] = useState<string | null>(null);
     setLatitude(null);
     setLongitude(null);
     setCapturedImage(null);
+    setExistingImageUrl(null);
     setImageLat(null);
     setImageLng(null);
   };
@@ -338,8 +325,8 @@ const [editingId, setEditingId] = useState<string | null>(null);
       Alert.alert('Validation Error', 'Please capture your current location.');
       return;
     }
-    if (!capturedImage) {
-      Alert.alert('Validation Error', 'Please take a photo to punch in.');
+    if (!capturedImage && !existingImageUrl) {
+      Alert.alert('Validation Error', 'Please take or choose a photo to punch in.');
       return;
     }
 
@@ -382,11 +369,9 @@ const [editingId, setEditingId] = useState<string | null>(null);
       formData.append('location_name', locationName || '');
       formData.append('image_latitude', (imageLat ?? latitude).toFixed(6));
       formData.append('image_longitude', (imageLng ?? longitude).toFixed(6));
-      formData.append('image', {
-        uri: capturedImage.uri,
-        name: capturedImage.name,
-        type: capturedImage.type,
-      } as any);
+      if (capturedImage) {
+        formData.append('image', buildImageFormPart(capturedImage) as any);
+      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
@@ -564,11 +549,8 @@ const [editingId, setEditingId] = useState<string | null>(null);
                     setLocationName(selectedEntry.locationName);
                     setLatitude(parseFloat(selectedEntry.latitude) || null);
                     setLongitude(parseFloat(selectedEntry.longitude) || null);
-                    setCapturedImage(
-                      selectedEntry.imageUrl
-                        ? { uri: selectedEntry.imageUrl, name: 'existing.jpg', type: 'image/jpeg' }
-                        : null
-                    );
+                    setCapturedImage(null);
+                    setExistingImageUrl(selectedEntry.imageUrl || null);
                     setEditingId(selectedEntry.id);
                     setSelectedEntry(null);
                     setShowAddModal(true);
@@ -697,12 +679,24 @@ const [editingId, setEditingId] = useState<string | null>(null);
                     <Ionicons name="close-circle" size={24} color="#1C1B17" />
                   </TouchableOpacity>
                 </View>
-              ) : (
-                <TouchableOpacity style={styles.cameraBtn} onPress={takePhoto}>
-                  <Ionicons name="camera-outline" size={22} color="#1C1B17" />
-                  <Text style={styles.cameraBtnText}>Take Photo</Text>
+              ) : existingImageUrl ? (
+                <View style={styles.previewWrap}>
+                  <Image source={{ uri: existingImageUrl }} style={styles.previewImage} />
+                  <View style={styles.existingBadge}>
+                    <Text style={styles.existingBadgeText}>Current photo</Text>
+                  </View>
+                </View>
+              ) : null}
+              <View style={styles.photoBtnRow}>
+                <TouchableOpacity style={[styles.cameraBtn, { flex: 1 }]} onPress={pickImage}>
+                  <Ionicons name="images-outline" size={20} color="#1C1B17" />
+                  <Text style={styles.cameraBtnText}>Gallery</Text>
                 </TouchableOpacity>
-              )}
+                <TouchableOpacity style={[styles.cameraBtn, { flex: 1 }]} onPress={takePhoto}>
+                  <Ionicons name="camera-outline" size={20} color="#1C1B17" />
+                  <Text style={styles.cameraBtnText}>Camera</Text>
+                </TouchableOpacity>
+              </View>
 
             
               <TouchableOpacity
@@ -864,7 +858,13 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: '#E8E3D9', borderStyle: 'dashed', borderRadius: 16, paddingVertical: 20,
   },
   cameraBtnText: { fontSize: 14, fontWeight: '700', color: '#1C1B17' },
+  photoBtnRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   previewWrap: { borderRadius: 16, overflow: 'hidden', height: 200, position: 'relative' },
+  existingBadge: {
+    position: 'absolute', bottom: 10, left: 10,
+    backgroundColor: 'rgba(28,27,23,0.75)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6,
+  },
+  existingBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
   previewImage: { width: '100%', height: '100%' },
   removeBtn: { position: 'absolute', top: 10, right: 10, backgroundColor: '#FFFFFF', borderRadius: 14 },
   submitBtn: {

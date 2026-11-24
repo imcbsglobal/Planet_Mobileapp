@@ -2,10 +2,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 
-import * as SecureStore from 'expo-secure-store';
+import { buildImageFormPart, captureImageWithCamera, pickImageFromGallery, prepareImageAsset } from '../lib/imageUpload';
+import * as SecureStore from '../lib/secureStore';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -602,61 +602,17 @@ const fetchCompanies = async () => {
     setExpenseTypeSearchText('');
   }, []);
 
-  const buildPaymentProofAsset = async (asset: ImagePicker.ImagePickerAsset): Promise<PaymentProofAsset> => {
-  // Resize + re-compress so the upload stays well under the server's 413 limit
-  const manipulated = await ImageManipulator.manipulateAsync(
-    asset.uri,
-    [{ resize: { width: 1280 } }],
-    { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
-  );
-
-  const name = `payment_proof_${Date.now()}.jpg`;
-  return { uri: manipulated.uri, name, type: 'image/jpeg' };
-};
-
-  /* ── Image picker ── */
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera roll permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        setPaymentProofAsset(await buildPaymentProofAsset(asset));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
+  const applyPickedImage = async (asset: ImagePicker.ImagePickerAsset | null) => {
+    if (!asset) return;
+    const prepared = await prepareImageAsset(asset);
+    if (!prepared) return;
+    setScreenshot(prepared.uri);
+    setPaymentProofAsset(prepared);
   };
 
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        setPaymentProofAsset(await buildPaymentProofAsset(asset));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
-  };
+  const pickImage = async () => applyPickedImage(await pickImageFromGallery());
+
+  const takePhoto = async () => applyPickedImage(await captureImageWithCamera());
 
   /* ── Submit ── */
   const handleSubmit = async () => {
@@ -729,14 +685,9 @@ const fetchCompanies = async () => {
 
       // Payment proof — only when required
      if (paymentProofAsset) {
-      const receiptFile = {
-        uri: paymentProofAsset.uri,
-        name: paymentProofAsset.name,
-        type: paymentProofAsset.type,
-      } as any;
+       formData.append('receipt', buildImageFormPart(paymentProofAsset) as any);
+     }
 
-      formData.append('receipt', receiptFile);
-    }
 
       // Direct fetch — avoids the stale-state risk inside makeAPICall
       const controller = new AbortController();

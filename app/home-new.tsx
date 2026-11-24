@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as SecureStore from '../lib/secureStore';
 
 interface UserCredentials {
   userId: string;
@@ -39,7 +39,10 @@ interface ModuleItem {
   icon: string;
   route: string;
   menuKey: string;
+  requiresEnquiry?: boolean;
 }
+
+const ENQUIRY_API_URL = 'https://planet.imcbs.com/api/enquiry/enquiries/';
 
 export default function Home() {
   const navigation = useNavigation();
@@ -54,6 +57,7 @@ export default function Home() {
  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [userMenuKeys, setUserMenuKeys] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasEnquiry, setHasEnquiry] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
@@ -120,6 +124,27 @@ export default function Home() {
       route: 'enquiry',
       menuKey: '*',
     },
+    {
+      id: '8',
+      title: 'Trellisco ERP',
+      subtitle: 'Create enquiries in Trellisco ERP',
+      icon: 'globe-outline',
+      route: 'trelliscoerp',
+      menuKey: '*',
+      // Only surfaced once the logged-in user has at least one enquiry.
+      requiresEnquiry: true,
+    },
+    {
+      id: '9',
+      title: 'Vehicles',
+      subtitle: 'Track vehicles',
+      icon: 'car-outline',
+      route: 'vehicle',
+      // Open to every user, like Punch In / Enquiry — switch to "vehicle" (or
+      // "vehicle-*" if access is granted per-company) once the backend adds
+      // permission gating for this module.
+      menuKey: '*',
+    },
   ];
 
     const getUserSpecificKey = (baseKey: string) => {
@@ -140,6 +165,39 @@ export default function Home() {
     }
     return userMenuKeys.includes(menuKey);
   };
+
+  // Modules flagged requiresEnquiry (Trellisco ERP) stay hidden until the user
+  // has raised at least one enquiry of their own.
+  const visibleModules = modules.filter((m) => !m.requiresEnquiry || hasEnquiry);
+
+  // Asks the enquiry API whether this user owns any enquiry. `creator` on the
+  // API is sometimes the username and sometimes the login id, so both match.
+  const checkHasEnquiry = useCallback(async () => {
+    try {
+      const [token, storedUsername, userId] = await Promise.all([
+        SecureStore.getItemAsync('token'),
+        SecureStore.getItemAsync('username'),
+        SecureStore.getItemAsync('userId'),
+      ]);
+      const response = await fetch(ENQUIRY_API_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const parsed = JSON.parse(await response.text());
+      const rows: any[] = Array.isArray(parsed) ? parsed : parsed?.results || [];
+      const uname = (storedUsername || '').trim().toLowerCase();
+      const uid = (userId || '').trim().toLowerCase();
+      setHasEnquiry(
+        rows.some((r) => {
+          const creator = String(r.creator || '').trim().toLowerCase();
+          if (!creator) return false;
+          return (!!uname && creator === uname) || (!!uid && creator === uid);
+        })
+      );
+    } catch (error) {
+      console.log('checkHasEnquiry error:', error);
+    }
+  }, []);
 
   const processImageUrl = (imageUrl: string): string | null => {
     if (!imageUrl) return null;
@@ -228,8 +286,9 @@ const initializeUser = async () => {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchUserProfile();
+    await checkHasEnquiry();
     setRefreshing(false);
-  }, [userCredentials]);
+  }, [userCredentials, checkHasEnquiry]);
 
 const handleModulePress = (module: ModuleItem) => {
     if (!isModuleUnlocked(module.menuKey)) {
@@ -249,6 +308,8 @@ const handleModulePress = (module: ModuleItem) => {
        'stockreport': 'StockReportCompanies',
         'punchin': 'PunchIn',
        'enquiry': 'Enquiry',
+       'trelliscoerp': 'TrelliscoErp',
+       'vehicle': 'Vehicle',
     };
     navigation.navigate(routeMap[module.route] || module.route);
   };
@@ -353,6 +414,16 @@ const handleModulePress = (module: ModuleItem) => {
     }
   }, [userCredentials, isInitializing]);
 
+  // Re-check on return from Enquiry so Trellisco ERP appears right after the
+  // first enquiry is saved.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isInitializing && userCredentials?.userId) {
+        checkHasEnquiry();
+      }
+    }, [isInitializing, userCredentials, checkHasEnquiry])
+  );
+
   if (isInitializing || !userCredentials) {
     return (
       <View style={styles.loadingContainer}>
@@ -414,11 +485,11 @@ const handleModulePress = (module: ModuleItem) => {
         <View style={styles.modulesSection}>
           <View style={styles.moduleHeader}>
             <Text style={styles.moduleTitle}>Work Modules</Text>
-            <Text style={styles.moduleCount}>{modules.length} available</Text>
+<Text style={styles.moduleCount}>{visibleModules.length} available</Text>
           </View>
 
-       <View style={styles.moduleList}>
-            {modules.map((module) => {
+        <View style={styles.moduleList}>
+            {visibleModules.map((module) => {
               const unlocked = isModuleUnlocked(module.menuKey);
               return (
                 <TouchableOpacity

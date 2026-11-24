@@ -3,7 +3,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import * as SecureStore from 'expo-secure-store';
+import { buildImageFormPart, captureImageWithCamera, pickImageFromGallery, prepareImageAsset } from '../lib/imageUpload';
+import * as SecureStore from '../lib/secureStore';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -79,6 +80,9 @@ interface CollectionEntry {
   paymentProofUrl?: string | null;
   status?: string;
   createdByName?: string;
+  // Local Date.now() at cache-write time; used by the list screen to tell a
+  // submission that raced a list fetch apart from a record deleted on the web.
+  cachedAt?: number;
 }
 
 interface PaymentProofAsset {
@@ -651,60 +655,17 @@ const fetchCompanies = async () => {
     setManualCustomerPlace('');
   }, []);
 
-  const buildPaymentProofAsset = (asset: ImagePicker.ImagePickerAsset): PaymentProofAsset => {
-    const uri = asset.uri;
-    const rawName = asset.fileName || asset.uri.split('/').pop() || `payment_proof_${Date.now()}.jpg`;
-    const name = /\.[a-z0-9]+$/i.test(rawName) ? rawName : `${rawName}.jpg`;
-    const extension = (name.match(/\.([a-z0-9]+)$/i)?.[1] || 'jpg').toLowerCase();
-    const normalizedExtension = extension === 'jpg' ? 'jpeg' : extension;
-    const type = asset.mimeType || `image/${normalizedExtension}`;
-
-    return { uri, name, type };
+  const applyPickedImage = async (asset: ImagePicker.ImagePickerAsset | null) => {
+    if (!asset) return;
+    const prepared = await prepareImageAsset(asset);
+    if (!prepared) return;
+    setScreenshot(prepared.uri);
+    setPaymentProofAsset(prepared);
   };
 
-  /* ── Image picker ── */
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera roll permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        setPaymentProofAsset(buildPaymentProofAsset(asset));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
-  };
+  const pickImage = async () => applyPickedImage(await pickImageFromGallery());
 
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setScreenshot(asset.uri);
-        setPaymentProofAsset(buildPaymentProofAsset(asset));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
-  };
+  const takePhoto = async () => applyPickedImage(await captureImageWithCamera());
 
   /* ── Submit ── */
   const handleSubmit = async () => {
@@ -774,14 +735,9 @@ const fetchCompanies = async () => {
 
       // Payment proof — only when required
      if (requiresProof && paymentProofAsset) {
-      const proofFile = {
-        uri: paymentProofAsset.uri,
-        name: paymentProofAsset.name,
-        type: paymentProofAsset.type,
-      } as any;
+       formData.append('payment_proof', buildImageFormPart(paymentProofAsset) as any);
+     }
 
-      formData.append('payment_proof', proofFile);
-    }
 
       // Direct fetch — avoids the stale-state risk inside makeAPICall
       const controller = new AbortController();
@@ -843,6 +799,7 @@ const fetchCompanies = async () => {
         status:               'pending',
         createdAt:            result?.data?.created_at || new Date().toISOString(),
         createdByName:        result?.data?.created_by_name || creatorName,
+        cachedAt:             Date.now(),
       };
 
       const storageKey  = `collections_${creds.userId}`;

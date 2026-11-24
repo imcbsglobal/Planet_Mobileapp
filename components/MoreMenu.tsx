@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../lib/secureStore';
 import React from 'react';
 import {
   Alert,

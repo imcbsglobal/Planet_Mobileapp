@@ -2,8 +2,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -18,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as SecureStore from '../lib/secureStore';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -61,12 +61,23 @@ interface CollectionEntry {
   createdAt: string;
   createdByName?: string;
   createdById?: string;
+  // True once this entry has been observed in the (filtered) server list.
+  synced?: boolean;
+  // Local Date.now() captured when the submit screen wrote this entry to the
+  // cache. Lets fetchCollections tell "my submission raced this fetch" apart
+  // from "this record was deleted on the web".
+  cachedAt?: number;
 }
 
 /* ─────────────────────────── Constants ─────────────────────── */
 
 const API_BASE_URL = 'https://my.myimc.in/app4/api';
 const COLLECTION_API_CANDIDATES = [
+  // Primary: same backend the web administration (Planet Administration SPA)
+  // reads from and issues DELETE against — so deletions made on the web are
+  // reflected here immediately. Also receives mobile ADD submissions.
+  'https://planet.imcbs.com/api/collection/collections/',
+  // Legacy fallbacks (stale datasets, kept only if primary is unreachable)
   'https://my.myimc.in/collection/collections/api/list/',
   'https://my.myimc.in/app4/api/collections/',
   'https://my.myimc.in/collection/api/collections/',
@@ -85,6 +96,7 @@ const COLLECTION_TYPE_CONFIG: Record<CollectionType, { label: string; bg: string
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   pending:  { label: 'Pending',  bg: '#FEF9C3', text: '#A16207' },
   approved: { label: 'Approved', bg: '#DCFCE7', text: '#15803D' },
+  verified: { label: 'Verified', bg: '#DCFCE7', text: '#15803D' },
   rejected: { label: 'Rejected', bg: '#FFE4E6', text: '#BE123C' },
 };
 
@@ -348,6 +360,8 @@ export default function Collection() {
   /* ── Fetch collections — auto-discovers working URL from candidates ── */
   const fetchCollections = async (creds: UserCredentials, branchList: Branch[]) => {
     const authHeader = `Basic ${btoa(`${creds.userId}:${creds.password}`)}`;
+    const fetchStartedAt = Date.now();
+    let usedUrl = '';
 
     try {
       let rawList: any[] = [];
@@ -388,6 +402,7 @@ export default function Collection() {
             console.log('RAW RECORD DEBUG → keys:', Object.keys(rawList[0]));
             console.log('RAW RECORD DEBUG → first record:', JSON.stringify(rawList[0]));
           }
+          usedUrl = url;
           found = true;
           break;
         } catch (urlErr) {
@@ -405,26 +420,44 @@ export default function Collection() {
       );
 
       const userCollections = filterToUser(mapped, creds);
+      // Everything coming from the server list counts as synced — once an
+      // entry is seen here it must never be resurrected from local cache.
+      userCollections.forEach(e => { e.synced = true; });
 
-      // Workaround for a backend limitation: the list endpoint appears to
-      // always return the same fixed page of records rather than the
-      // newest ones, so a just-submitted collection can be missing from
-      // it entirely. Keep showing any recently-cached local entries the
-      // server list doesn't include, until the server catches up (or 24h
-      // passes, so a genuine server-side deletion doesn't stay hidden forever).
+      // Reconcile local cache against the server list:
+      //  * Cached id IS in the full (pre-filter) server list → the record is
+      //    NOT deleted; filterToUser merely excluded it, so keep showing the
+      //    cached copy (deduped against the filtered server copy below).
+      //  * Cached id is NOT in the server list → deleted from the web (the
+      //    DELETE endpoint 404s and drops it from the list) → evict it —
+      //    unless it was written to cache AFTER this fetch started (the fetch
+      //    raced a just-completed submission; the next fetch evicts it if it
+      //    was really deleted).
+      //  * A fallback (non-primary) URL served this request, so its dataset is
+      //    stale/unrelated → never evict anything based on it.
       let merged = userCollections;
       try {
         const cachedRaw = await AsyncStorage.getItem(`collections_${creds.userId}`);
         if (cachedRaw) {
           const cached: CollectionEntry[] = JSON.parse(cachedRaw);
           const serverIds = new Set(userCollections.map(e => e.id));
-          const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const rawIds    = new Set(mapped.map(e => e.id));
+          const isPrimary = usedUrl === COLLECTION_API_CANDIDATES[0];
           const pendingLocal = cached.filter(e =>
-            !serverIds.has(e.id) && new Date(e.createdAt).getTime() > dayAgo
+            !serverIds.has(e.id) &&
+            (!isPrimary ||
+              rawIds.has(e.id) ||
+              (typeof e.cachedAt === 'number' && e.cachedAt > fetchStartedAt))
           );
           if (pendingLocal.length > 0) {
-            if (__DEV__) console.log('MERGE DEBUG → keeping pending local entries not yet in server list:', pendingLocal.map(e => e.id));
+            if (__DEV__) console.log('MERGE DEBUG → keeping cached entries still present on server (or racing this fetch):', pendingLocal.map(e => e.id));
             merged = [...pendingLocal, ...userCollections];
+          }
+          const evictedIds = cached
+            .filter(e => !serverIds.has(e.id) && !pendingLocal.includes(e))
+            .map(e => e.id);
+          if (evictedIds.length > 0) {
+            if (__DEV__) console.log('MERGE DEBUG → evicting cache entries absent from server list (deleted on web):', evictedIds);
           }
         }
       } catch {}

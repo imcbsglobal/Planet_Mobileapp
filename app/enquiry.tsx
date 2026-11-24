@@ -1,6 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { File } from 'expo-file-system';
 import {
   AudioModule,
   RecordingPresets,
@@ -9,11 +10,10 @@ import {
   useAudioPlayerStatus,
   useAudioRecorder,
 } from 'expo-audio';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as SecureStore from 'expo-secure-store';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { buildImageFormPart, captureImageWithCamera, pickImageFromGallery, prepareImageAsset } from '../lib/imageUpload';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,6 +31,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as SecureStore from '../lib/secureStore';
 /* ─────────────────────────── Types ─────────────────────────── */
 
 interface EnquiryEntry {
@@ -41,12 +42,17 @@ interface EnquiryEntry {
   location: string;
   branch?: string;
   purpose: string;
+  type?: string;
+  agent?: string;
   requirements?: string[];
   notes?: string;
   imageUrl?: string | null;
   audioUrl?: string | null;
   creator?: string;
   date: string;
+  campaignId?: string;
+  campaignName?: string;
+  campaignSoftware?: string;
 }
 
 interface CapturedImage {
@@ -78,6 +84,23 @@ interface SoftwareItem {
   id: number;
   name: string;
   type: string; // RA | IA | HW | OTHERS
+}
+
+interface AgentOption {
+  id: string | number;
+  name: string;
+  firm?: string;
+  location?: string;
+  phone?: string;
+}
+
+interface CampaignOption {
+  id: string | number;
+  campaignId: string;
+  name: string;
+  softwareName: string;
+  location?: string;
+  status?: string;
 }
 
 const parseJsonArray = (raw: any): string[] => {
@@ -118,9 +141,12 @@ const ENQUIRY_API_URL = 'https://planet.imcbs.com/api/enquiry/enquiries/';
 const CLIENT_API_URL = 'https://planet.imcbs.com/api/clientmaster/clientmaster/?page=1&page_size=50';
 const ACC_DEPARTMENTS_API_URL = 'https://accmaster.imcbs.com/api/sync/acc-departments/';
 const SOFTWARE_API_URL = 'https://planet.imcbs.com/api/master/software/';
+const AGENTS_API_URL = 'https://planet.imcbs.com/api/agentmaster/agents/';
+const CAMPAIGNS_API_URL = 'https://planet.imcbs.com/api/campaign/campaigns/';
 const FETCH_TIMEOUT = 15000;
 const PURPOSE_SUGGESTIONS = ['Quotation', 'Product Enquiry', 'Pricing', 'Follow-up', 'Complaint', 'Other'];
 const TYPE_OPTIONS = ['RA', 'IA', 'HW', 'OTHERS'];
+const ENQUIRY_TYPE_OPTIONS = ['Direct', 'Campaign'];
 
 /* ─────────────────────────── Audio Player ────────────────────
    Small reusable play/pause control. Used both for previewing a
@@ -199,6 +225,7 @@ export default function Enquiry() {
 
   // Detail popup (eye icon)
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showRequirementsModal, setShowRequirementsModal] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<EnquiryEntry | null>(null);
 
   const [owner, setOwner] = useState('');
@@ -238,13 +265,30 @@ export default function Enquiry() {
  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState('');
 
+  /* ── Enquiry Type / Agent ── */
+  const [enquiryType, setEnquiryType] = useState('');
+  const [agent, setAgent] = useState('');
+
+  /* ── Agents (fetched from agentmaster API) ── */
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [agentQuery, setAgentQuery] = useState('');
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false);
+
+  /* ── Campaigns (fetched from campaign API) ── */
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [campaignQuery, setCampaignQuery] = useState('');
+  const [showCampaignDropdown, setShowCampaignDropdown] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignOption | null>(null);
+
   /* ── Software Type / Requirements (fetched from master/software API) ── */
   const [softwareList, setSoftwareList] = useState<SoftwareItem[]>([]);
   const [softwareLoaded, setSoftwareLoaded] = useState(false);
   const [loadingSoftware, setLoadingSoftware] = useState(false);
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [selectedRequirements, setSelectedRequirements] = useState<string[]>([]);
-  const [showRequirementsModal, setShowRequirementsModal] = useState(false);
 
   /* ── Init ── */
   useEffect(() => {
@@ -285,6 +329,18 @@ export default function Enquiry() {
     }
   }, [showAddModal, softwareLoaded]);
 
+  useEffect(() => {
+    if (showAddModal && !agentsLoaded) {
+      fetchAgents();
+    }
+  }, [showAddModal, agentsLoaded]);
+
+  useEffect(() => {
+    if (showAddModal && !campaignsLoaded) {
+      fetchCampaigns();
+    }
+  }, [showAddModal, campaignsLoaded]);
+
   const authHeaders = async () => ({
     Authorization: `Bearer ${await SecureStore.getItemAsync('token')}`,
   });
@@ -305,12 +361,17 @@ export default function Enquiry() {
         location: r.location || '',
         branch: r.branch || '',
         purpose: r.purpose || '',
+        type: r.type || r.enquiry_type || '',
+        agent: r.agent || '',
         requirements: r.software ? r.software.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
         notes: r.notes || '',
         imageUrl: r.image_url || r.image || null,
         audioUrl: r.audio_url || r.audio || null,
         creator: r.creator || '',
         date: r.date || r.created_at || '',
+        campaignId: r.campaign_id || '',
+        campaignName: r.campaign_name || '',
+        campaignSoftware: r.campaign_software || '',
       }));
 
       formatted.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -341,7 +402,7 @@ export default function Enquiry() {
   }, []);
 
   /* ── Clients (Select Existing Client) ── */
-  const fetchClients = async () => {
+  async function fetchClients() {
     try {
       setLoadingClients(true);
       const headers = await authHeaders();
@@ -359,7 +420,7 @@ export default function Enquiry() {
     } finally {
       setLoadingClients(false);
     }
-  };
+  }
 
    const filteredClients = React.useMemo(() => {
     const q = clientQuery.trim().toLowerCase();
@@ -381,7 +442,7 @@ export default function Enquiry() {
     return '';
   };
 
-  const fetchBranches = async () => {
+  async function fetchBranches() {
     try {
       setLoadingBranches(true);
       const controller = new AbortController();
@@ -419,7 +480,7 @@ export default function Enquiry() {
     } finally {
       setLoadingBranches(false);
     }
-  };
+  }
 
  const filteredBranches = React.useMemo(() => {
     const q = branchQuery.trim().toLowerCase();
@@ -428,7 +489,7 @@ export default function Enquiry() {
   }, [branches, branchQuery]);
 
   /* ── Software Type / Requirements ── */
-  const fetchSoftwareList = async () => {
+  async function fetchSoftwareList() {
     try {
       setLoadingSoftware(true);
       const headers = await authHeaders();
@@ -445,26 +506,103 @@ export default function Enquiry() {
     } finally {
       setLoadingSoftware(false);
     }
-  };
-
-  const toggleType = (type: string) => {
-    setSelectedTypes(prev => {
-      const next = prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type];
-      // Drop any selected requirement whose type got unchecked
-      setSelectedRequirements(reqs =>
-        reqs.filter(name => {
-          const item = softwareList.find(s => s.name === name);
-          return item ? next.includes(item.type) : false;
-        })
-      );
-      return next;
-    });
-  };
+  }
 
   const toggleRequirement = (name: string) => {
     setSelectedRequirements(prev =>
       prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
     );
+  };
+
+  /* ── Agents (Select Agent) ── */
+  async function fetchAgents() {
+    try {
+      setLoadingAgents(true);
+      const headers = await authHeaders();
+      const response = await fetch(AGENTS_API_URL, { headers });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text);
+
+      const json = JSON.parse(text);
+      const rows: any[] = Array.isArray(json) ? json : json.results || [];
+      const formatted: AgentOption[] = rows.map((a: any) => ({
+        id: a.id,
+        name: a.name || '',
+        firm: a.firm || '',
+        location: a.location || '',
+        phone: a.phone_number || a.phone || '',
+      }));
+      formatted.sort((a, b) => a.name.localeCompare(b.name));
+      setAgents(formatted);
+      setAgentsLoaded(true);
+    } catch (err) {
+      console.log('fetchAgents error:', err);
+    } finally {
+      setLoadingAgents(false);
+    }
+  }
+
+  const filteredAgents = React.useMemo(() => {
+    const q = agentQuery.trim().toLowerCase();
+    if (!q) return agents;
+    return agents.filter(
+      a =>
+        a.name.toLowerCase().includes(q) ||
+        (a.firm || '').toLowerCase().includes(q) ||
+        (a.location || '').toLowerCase().includes(q)
+    );
+  }, [agents, agentQuery]);
+
+  const selectAgent = (a: AgentOption) => {
+    setAgent(a.name);
+    setShowAgentDropdown(false);
+    setAgentQuery('');
+  };
+
+  /* ── Campaigns (Select Campaign) ── */
+  async function fetchCampaigns() {
+    try {
+      setLoadingCampaigns(true);
+      const headers = await authHeaders();
+      const response = await fetch(CAMPAIGNS_API_URL, { headers });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text);
+
+      const json = JSON.parse(text);
+      const rows: any[] = Array.isArray(json) ? json : json.results || [];
+      const formatted: CampaignOption[] = rows.map((c: any) => ({
+        id: c.id,
+        campaignId: c.campaign_id || '',
+        name: c.campaign_name || '',
+        softwareName: c.software_name || '',
+        location: c.campaign_location || '',
+        status: c.status || '',
+      }));
+      formatted.sort((a, b) => (a.campaignId < b.campaignId ? -1 : 1) || a.name.localeCompare(b.name));
+      setCampaigns(formatted);
+      setCampaignsLoaded(true);
+    } catch (err) {
+      console.log('fetchCampaigns error:', err);
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  }
+
+  const filteredCampaigns = React.useMemo(() => {
+    const q = campaignQuery.trim().toLowerCase();
+    if (!q) return campaigns;
+    return campaigns.filter(
+      c =>
+        c.campaignId.toLowerCase().includes(q) ||
+        c.name.toLowerCase().includes(q) ||
+        c.softwareName.toLowerCase().includes(q)
+    );
+  }, [campaigns, campaignQuery]);
+
+  const selectCampaign = (c: CampaignOption) => {
+    setSelectedCampaign(c);
+    setShowCampaignDropdown(false);
+    setCampaignQuery('');
   };
 
   const selectedBranch = React.useMemo(
@@ -529,50 +667,15 @@ export default function Enquiry() {
   };
 
   /* ── Image ── */
-  const buildCapturedImage = async (asset: ImagePicker.ImagePickerAsset): Promise<CapturedImage> => {
-    const manipulated = await ImageManipulator.manipulateAsync(
-      asset.uri,
-      [{ resize: { width: 1280 } }],
-      { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return { uri: manipulated.uri, name: `enquiry_${Date.now()}.jpg`, type: 'image/jpeg' };
+  const applyPickedImage = async (asset: ImagePicker.ImagePickerAsset | null) => {
+    if (!asset) return;
+    const prepared = await prepareImageAsset(asset);
+    if (prepared) setCapturedImage(prepared);
   };
 
-  const pickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Photo library permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        setCapturedImage(await buildCapturedImage(result.assets[0]));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
-    }
-  };
+  const pickImage = async () => applyPickedImage(await pickImageFromGallery());
 
-  const takePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is needed.');
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
-      if (!result.canceled && result.assets[0]) {
-        setCapturedImage(await buildCapturedImage(result.assets[0]));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
-  };
+  const takePhoto = async () => applyPickedImage(await captureImageWithCamera());
 
   /* ── Audio recording ── */
   const startRecording = async () => {
@@ -616,6 +719,13 @@ export default function Enquiry() {
     setLng(null);
     setPurpose('');
     setNotes('');
+    setEnquiryType('');
+    setAgent('');
+    setAgentQuery('');
+    setShowAgentDropdown(false);
+    setSelectedCampaign(null);
+    setCampaignQuery('');
+    setShowCampaignDropdown(false);
     setCapturedImage(null);
     setCapturedAudio(null);
     setExistingImageUrl(null);
@@ -626,10 +736,9 @@ export default function Enquiry() {
      setSelectedBranchId('');
     setBranchQuery('');
     setShowBranchDropdown(false);
-    setSelectedTypes([]);
     setSelectedRequirements([]);
-    setShowRequirementsModal(false);
     setShowPurposeDropdown(false);
+    setShowRequirementsModal(false);
     setEditingEntryId(null);
   };
 
@@ -669,12 +778,20 @@ export default function Enquiry() {
     setCapturedAudio(null);
     setLat(null);
     setLng(null);
-     setSelectedClient(null);
+    setSelectedClient(null);
     setClientQuery('');
     setShowClientDropdown(false);
     setSelectedBranchId(entry.branch || '');
     setBranchQuery('');
     setShowBranchDropdown(false);
+    setEnquiryType(entry.type || '');
+    setAgent(entry.agent || '');
+    const match =
+      campaigns.find(c => c.campaignId === entry.campaignId) ||
+      campaigns.find(c => c.name === entry.campaignName);
+    setSelectedCampaign(match || null);
+    setCampaignQuery('');
+    setShowCampaignDropdown(false);
     setSelectedRequirements(entry.requirements || []);
     setShowPurposeDropdown(false);
     setShowDetailModal(false);
@@ -749,23 +866,27 @@ export default function Enquiry() {
     formData.append('notes', notes.trim());
     formData.append('creator', myUsername || myUserId);
     formData.append('branch', selectedBranchId.trim());
+    formData.append('type', enquiryType.trim());
+    formData.append('agent', agent.trim());
+      formData.append('campaign_id', selectedCampaign ? selectedCampaign.campaignId : '');
+      formData.append('campaign_name', selectedCampaign ? selectedCampaign.name : '');
+      formData.append('campaign_software', selectedCampaign ? selectedCampaign.softwareName : '');
       if (selectedClient) {
         formData.append('client', String(selectedClient.id));
       }
 
       if (capturedImage) {
-        formData.append('image', {
-          uri: capturedImage.uri,
-          name: capturedImage.name,
-          type: capturedImage.type,
-        } as any);
+        formData.append('image', buildImageFormPart(capturedImage) as any);
       }
       if (capturedAudio) {
-        formData.append('audio', {
+        const audioFile = new File(capturedAudio.uri);
+        const audioPart = {
           uri: capturedAudio.uri,
           name: capturedAudio.name,
-          type: capturedAudio.type,
-        } as any);
+          type: audioFile.type || capturedAudio.type,
+          bytes: () => audioFile.bytes(),
+        } as any;
+        formData.append('audio', audioPart);
       }
 
       const controller = new AbortController();
@@ -890,6 +1011,15 @@ return (
                   <DetailRow icon="call-outline" label="Phone" value={selectedEntry.phone} />
                   <DetailRow icon="location-outline" label="Location" value={selectedEntry.location} />
                   <DetailRow icon="pricetag-outline" label="Purpose" value={selectedEntry.purpose} />
+                  <DetailRow icon="options-outline" label="Type" value={selectedEntry.type} />
+                  <DetailRow icon="person-circle-outline" label="Agent" value={selectedEntry.agent} />
+                  <DetailRow
+                    icon="megaphone-outline"
+                    label="Campaign"
+                    value={selectedEntry.campaignId
+                      ? `${selectedEntry.campaignId}${selectedEntry.campaignName ? ` · ${selectedEntry.campaignName}` : ''}${selectedEntry.campaignSoftware ? ` (${selectedEntry.campaignSoftware})` : ''}`
+                      : ''}
+                  />
                 {!!selectedEntry.requirements?.length && (
                     <DetailRow icon="list-outline" label="Software" value={selectedEntry.requirements.join(', ')} />
                   )}
@@ -937,6 +1067,99 @@ return (
             <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
 
             <View style={styles.labelRow}>
+                <Text style={styles.label}>TYPE</Text>
+              </View>
+              <View style={styles.proofButtonRow}>
+                {ENQUIRY_TYPE_OPTIONS.map(t => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.proofButton, enquiryType === t && styles.proofButtonActive]}
+                    onPress={() => {
+                      setEnquiryType(t);
+                      if (t !== 'Campaign') {
+                        setSelectedCampaign(null);
+                        setCampaignQuery('');
+                        setShowCampaignDropdown(false);
+                      }
+                    }}
+                  >
+                    <Text style={styles.proofButtonText}>{t}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {enquiryType === 'Campaign' && (
+                <>
+                  <View style={styles.labelRow}>
+                    <Text style={styles.label}>CAMPAIGN</Text>
+                    {loadingCampaigns && <ActivityIndicator size="small" color="#A39A85" />}
+                  </View>
+                  {selectedCampaign ? (
+                    <View style={styles.selectedClientChip}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.selectedClientName}>{selectedCampaign.name || selectedCampaign.campaignId}</Text>
+                        <Text style={styles.selectedClientSub}>
+                          {[selectedCampaign.campaignId, selectedCampaign.softwareName].filter(Boolean).join(' · ')}
+                        </Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setSelectedCampaign(null)}>
+                        <Ionicons name="close-circle" size={22} color="#A39A85" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                        onPress={() => setShowCampaignDropdown(prev => !prev)}
+                      >
+                        <Text style={{ fontSize: 15, fontWeight: '500', color: '#A39A85' }}>
+                          Select campaign
+                        </Text>
+                        <Ionicons name={showCampaignDropdown ? 'chevron-up' : 'chevron-down'} size={18} color="#A39A85" />
+                      </TouchableOpacity>
+                      {showCampaignDropdown && (
+                        <View style={styles.dropdownBox}>
+                          <TextInput
+                            style={[styles.input, { marginBottom: 6 }]}
+                            placeholder="Search campaign…"
+                            placeholderTextColor="#A39A85"
+                            value={campaignQuery}
+                            onChangeText={setCampaignQuery}
+                            autoFocus
+                          />
+                          {loadingCampaigns ? (
+                            <View style={styles.dropdownEmpty}>
+                              <ActivityIndicator size="small" color="#A39A85" />
+                            </View>
+                          ) : filteredCampaigns.length === 0 ? (
+                            <View style={styles.dropdownEmpty}>
+                              <Text style={styles.dropdownEmptyText}>
+                                {campaignsLoaded ? 'No matching campaigns' : 'Loading campaigns…'}
+                              </Text>
+                            </View>
+                          ) : (
+                            <ScrollView style={styles.dropdownScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                              {filteredCampaigns.map(c => (
+                                <TouchableOpacity
+                                  key={String(c.id)}
+                                  style={styles.dropdownItem}
+                                  onPress={() => selectCampaign(c)}
+                                >
+                                  <Text style={styles.dropdownItemTitle}>{c.name || c.campaignId}</Text>
+                                  <Text style={styles.dropdownItemSub}>
+                                    {[c.campaignId, c.softwareName].filter(Boolean).join(' · ')}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+            <View style={styles.labelRow}>
                 <Text style={styles.label}>BRANCH</Text>
                 {loadingBranches && <ActivityIndicator size="small" color="#A39A85" />}
               </View>
@@ -970,6 +1193,59 @@ return (
                   </View>
                 </>
               )}
+              {/* ── Agent ── */}
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>AGENT</Text>
+                {loadingAgents && <ActivityIndicator size="small" color="#A39A85" />}
+              </View>
+              <TouchableOpacity
+                style={[styles.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                onPress={() => setShowAgentDropdown(prev => !prev)}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '500', color: agent ? '#1C1B17' : '#A39A85' }}>
+                  {agent || 'Select agent'}
+                </Text>
+                <Ionicons name={showAgentDropdown ? 'chevron-up' : 'chevron-down'} size={18} color="#A39A85" />
+              </TouchableOpacity>
+              {showAgentDropdown && (
+                <View style={styles.dropdownBox}>
+                  <TextInput
+                    style={[styles.input, { marginBottom: 6 }]}
+                    placeholder="Search agent…"
+                    placeholderTextColor="#A39A85"
+                    value={agentQuery}
+                    onChangeText={setAgentQuery}
+                    autoFocus
+                  />
+                  {loadingAgents ? (
+                    <View style={styles.dropdownEmpty}>
+                      <ActivityIndicator size="small" color="#A39A85" />
+                    </View>
+                  ) : filteredAgents.length === 0 ? (
+                    <View style={styles.dropdownEmpty}>
+                      <Text style={styles.dropdownEmptyText}>
+                        {agentsLoaded ? 'No matching agents' : 'Loading agents…'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                      {filteredAgents.map(a => (
+                        <TouchableOpacity
+                          key={String(a.id)}
+                          style={styles.dropdownItem}
+                          onPress={() => selectAgent(a)}
+                        >
+                          <Text style={styles.dropdownItemTitle}>{a.name}</Text>
+                          <Text style={styles.dropdownItemSub}>
+                            {[a.firm, a.location, a.phone].filter(Boolean).join(' · ')}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              )}
+
               {/* ── New / Existing Client toggle ── */}
               <Text style={styles.label}>CLIENT TYPE</Text>
               <View style={styles.proofButtonRow}>
@@ -1094,76 +1370,71 @@ return (
                   ))}
                 </View>
               )}
-             <Text style={styles.label}>TYPE</Text>
-              <View style={styles.proofButtonRow}>
-                {TYPE_OPTIONS.map(t => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[styles.proofButton, selectedTypes.includes(t) && styles.proofButtonActive]}
-                    onPress={() => toggleType(t)}
-                  >
-                    <Text style={styles.proofButtonText}>{t}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
 
               <View style={styles.labelRow}>
                 <Text style={styles.label}>REQUIREMENTS</Text>
                 {loadingSoftware && <ActivityIndicator size="small" color="#A39A85" />}
               </View>
               <TouchableOpacity
-                style={[styles.input, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, !selectedTypes.length && { opacity: 0.5 }]}
-                onPress={() => selectedTypes.length && setShowRequirementsModal(true)}
-                disabled={!selectedTypes.length}
+                style={styles.requirementPicker}
+                onPress={() => setShowRequirementsModal(true)}
               >
-                <Text style={{ fontSize: 15, fontWeight: '500', color: selectedRequirements.length ? '#1C1B17' : '#A39A85' }}>
-                  {selectedRequirements.length
-                    ? `${selectedRequirements.length} selected`
-                    : selectedTypes.length
-                    ? 'Select requirements'
-                    : 'Select type first'}
+                <Text style={styles.requirementPickerText}>
+                  {selectedRequirements.length ? `${selectedRequirements.length} selected` : 'Select requirements'}
                 </Text>
                 <Ionicons name="chevron-down" size={18} color="#A39A85" />
               </TouchableOpacity>
-
+              {!!selectedRequirements.length && (
+                <TouchableOpacity onPress={() => setSelectedRequirements([])} style={{ paddingTop: 8, alignSelf: 'flex-end' }}>
+                  <Text style={{ color: '#A39A85', fontWeight: '700' }}>Clear All</Text>
+                </TouchableOpacity>
+              )}
               <Modal visible={showRequirementsModal} transparent animationType="fade" onRequestClose={() => setShowRequirementsModal(false)}>
-                <View style={styles.detailOverlay}>
-                  <View style={styles.detailCard}>
-                    <View style={styles.detailHeader}>
-                      <Text style={styles.detailTitle}>Select Requirements</Text>
-                      <TouchableOpacity style={styles.detailIconBtn} onPress={() => setShowRequirementsModal(false)}>
+                <TouchableOpacity style={styles.requirementModalOverlay} activeOpacity={1} onPress={() => setShowRequirementsModal(false)}>
+                  <View style={styles.requirementModalSheet}>
+                    <View style={styles.requirementModalHeader}>
+                      <Text style={styles.requirementModalTitle}>Requirements</Text>
+                      <TouchableOpacity onPress={() => setShowRequirementsModal(false)}>
                         <Ionicons name="close" size={20} color="#1C1B17" />
                       </TouchableOpacity>
                     </View>
-                    <ScrollView style={styles.detailBody} contentContainerStyle={{ paddingBottom: 16 }}>
-                      {selectedTypes.map(type => (
-                        <View key={type} style={styles.detailSection}>
-                          <Text style={styles.detailSectionLabel}>{type}</Text>
-                          {softwareList.filter(s => s.type === type).map(s => (
-                            <TouchableOpacity
-                              key={s.id}
-                              style={[styles.dropdownItem, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}
-                              onPress={() => toggleRequirement(s.name)}
-                            >
-                              <Ionicons
-                                name={selectedRequirements.includes(s.name) ? 'checkbox' : 'square-outline'}
-                                size={20}
-                                color={selectedRequirements.includes(s.name) ? '#F5C451' : '#A39A85'}
-                              />
-                              <Text style={styles.dropdownItemTitle}>{s.name}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      ))}
+                    <ScrollView style={styles.requirementModalBody} nestedScrollEnabled>
+                      {loadingSoftware ? (
+                        <ActivityIndicator size="small" color="#A39A85" style={{ marginTop: 16 }} />
+                      ) : !softwareList.length ? (
+                        <Text style={{ fontSize: 15, fontWeight: '500', color: '#A39A85', marginTop: 16 }}>
+                          No requirements available
+                        </Text>
+                      ) : (
+                        TYPE_OPTIONS.filter(type => softwareList.some(s => s.type === type)).map(type => {
+                          const items = softwareList.filter(s => s.type === type);
+                          return (
+                            <View key={type} style={styles.detailSection}>
+                              <Text style={styles.detailSectionLabel}>{type}</Text>
+                              {items.map(s => (
+                                <TouchableOpacity
+                                  key={s.id}
+                                  style={[styles.dropdownItem, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}
+                                  onPress={() => toggleRequirement(s.name)}
+                                >
+                                  <Ionicons
+                                    name={selectedRequirements.includes(s.name) ? 'checkbox' : 'square-outline'}
+                                    size={20}
+                                    color={selectedRequirements.includes(s.name) ? '#F5C451' : '#A39A85'}
+                                  />
+                                  <Text style={styles.dropdownItemTitle}>{s.name}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          );
+                        })
+                      )}
                     </ScrollView>
-                    <TouchableOpacity onPress={() => setSelectedRequirements([])} style={{ padding: 12, alignItems: 'center' }}>
-                      <Text style={{ color: '#A39A85', fontWeight: '700' }}>Clear All</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.submitBtn} onPress={() => setShowRequirementsModal(false)}>
-                      <Text style={styles.submitBtnText}>Done ({selectedRequirements.length})</Text>
+                    <TouchableOpacity style={styles.requirementDoneBtn} onPress={() => setShowRequirementsModal(false)}>
+                      <Text style={styles.requirementDoneBtnText}>Done</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
+                </TouchableOpacity>
               </Modal>
               <Text style={styles.label}>NOTES</Text>
               <TextInput
@@ -1333,6 +1604,29 @@ const styles = StyleSheet.create({
     borderStyle: 'solid', borderColor: '#F5C451', backgroundColor: '#FFF9E9',
   },
   proofButtonText: { fontSize: 13, fontWeight: '700', color: '#1C1B17' },
+  requirementPicker: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#F7F5EE', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14,
+  },
+  requirementPickerText: { fontSize: 15, fontWeight: '500', color: '#1C1B17' },
+  requirementModalOverlay: {
+    flex: 1, backgroundColor: 'rgba(28,27,23,0.45)', justifyContent: 'flex-end',
+  },
+  requirementModalSheet: {
+    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: '75%', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16,
+  },
+  requirementModalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#F0EAD8',
+  },
+  requirementModalTitle: { fontSize: 16, fontWeight: '800', color: '#1C1B17' },
+  requirementModalBody: { paddingTop: 8, maxHeight: 420 },
+  requirementDoneBtn: {
+    marginTop: 14, backgroundColor: '#1C1B17', borderRadius: 50, paddingVertical: 14,
+    alignItems: 'center',
+  },
+  requirementDoneBtnText: { fontSize: 15, fontWeight: '800', color: '#F5C451' },
   previewWrap: { borderRadius: 16, overflow: 'hidden', height: 200, position: 'relative' },
   previewImage: { width: '100%', height: '100%' },
   removeBtn: { position: 'absolute', top: 10, right: 10, backgroundColor: '#FFFFFF', borderRadius: 14 },

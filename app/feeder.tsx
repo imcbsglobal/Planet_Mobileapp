@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../lib/secureStore';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
